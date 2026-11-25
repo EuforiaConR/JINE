@@ -1,11 +1,15 @@
 package com.euforia.jine.ui.components
 
+import com.euforia.jine.ui.theme.pixelFontSize
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.euforia.jine.R
@@ -13,8 +17,8 @@ import com.euforia.jine.ui.theme.JineBubble
 import com.euforia.jine.ui.theme.JineText
 import com.euforia.jine.ui.theme.ZpixFont
 
-import androidx.compose.foundation.background
-import androidx.compose.ui.tooling.preview.Preview
+private const val DIALOGUE_SCALE = 1f
+
 @Composable
 fun MessageBubble(
     message: String,
@@ -29,14 +33,14 @@ fun MessageBubble(
             resourceId = R.drawable.balloon_dialogue,
             slices = NineSliceInsets(7),
             modifier = Modifier.matchParentSize(),
-            scale = 1f,
+            scale = DIALOGUE_SCALE,
             tint = bubbleColor
         )
 
         Text(
             text = message,
             fontFamily = ZpixFont,
-            fontSize = 16.sp,
+            fontSize = pixelFontSize(16.sp),
             lineHeight = 22.sp,
             letterSpacing = 0.sp,
             color = JineText,
@@ -68,17 +72,30 @@ fun ReceivedMessage(
             modifier = Modifier.width(2.dp)
         )
 
-        PixelImage(
-            resourceId = R.drawable.tail_dialogue,
-            modifier = Modifier
-                .padding(top = 5.dp)
-                .size(6.dp, 10.dp),
-            tint = JineBubble
-        )
+        Box {
 
-        MessageBubble(
-            message = message
-        )
+            MessageBubble(
+                message = message,
+                modifier = Modifier.padding(
+                    start = 7.dp * DIALOGUE_SCALE
+                )
+            )
+
+            PixelImage(
+                resourceId = R.drawable.tail_dialogue,
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .offset(
+                        y = (-2).dp * DIALOGUE_SCALE
+                    )
+                    .size(
+                        width = 8.dp * DIALOGUE_SCALE,
+                        height = 24.dp * DIALOGUE_SCALE
+                    ),
+                tint = JineBubble,
+                contentScale = ContentScale.FillBounds
+            )
+        }
     }
 }
 

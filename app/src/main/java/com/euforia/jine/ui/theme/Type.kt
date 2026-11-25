@@ -9,6 +9,10 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.font.Font
 import com.euforia.jine.R
 
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.TextUnit
+import kotlin.math.roundToInt
 
 val ZpixFont = FontFamily(
     Font(R.font.zpix)
@@ -40,3 +44,20 @@ val Typography = Typography(
     )
     */
 )
+@Composable
+fun pixelFontSize(
+    fontSize: TextUnit,
+    baseSize: Int = 12
+): TextUnit {
+    val density = LocalDensity.current
+
+    return with(density) {
+        val sizePx = fontSize.toPx()
+
+        val scale = (sizePx / baseSize)
+            .roundToInt()
+            .coerceAtLeast(1)
+
+        (baseSize * scale).toFloat().toSp()
+    }
+}
