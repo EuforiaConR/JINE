@@ -1,3 +1,12 @@
 <resources>
-    <string name="app_name">JINE</string>
+    <string name="app_name" translatable="false">JINE</string>
+    <string name="chat_window_icon">Icono de JINE</string>
+    <string name="chat_window_minimize">Minimizar</string>
+    <string name="chat_window_maximize">Maximizar</string>
+    <string name="chat_window_close">Cerrar</string>
+    <string name="chat_ame_avatar">Avatar de Ame-chan</string>
+    <string name="sticker_catalog_error">No se pudieron cargar los stickers.</string>
+    <string name="sticker_catalog_empty">No hay stickers disponibles.</string>
+    <string name="sticker_selected">Sticker seleccionado</string>
+    <string name="sticker_not_selected">Sin seleccionar</string>
 </resources>

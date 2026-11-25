@@ -7,7 +7,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.euforia.jine.R
 import com.euforia.jine.core.assets.JineAssets
+import com.euforia.jine.core.localization.localizedStringResource
 import com.euforia.jine.ui.theme.JineText
 import com.euforia.jine.ui.theme.ZpixFont
 import com.euforia.jine.ui.theme.pixelFontSize
@@ -28,7 +30,7 @@ fun ChatHeader(
         PixelImage(
             path = JineAssets.Ui.WINDOW_ICON,
             modifier = Modifier.size(iconSize),
-            contentDescription = "JINE icon"
+            contentDescription = localizedStringResource(R.string.chat_window_icon)
         )
 
         Spacer(
@@ -36,7 +38,7 @@ fun ChatHeader(
         )
 
         Text(
-            text = "JINE",
+            text = localizedStringResource(R.string.app_name),
             fontFamily = ZpixFont,
             fontSize = pixelFontSize(12.sp * JINE_UI_SCALE),
             letterSpacing = 0.sp,
@@ -56,19 +58,19 @@ fun ChatHeader(
             PixelImage(
                 path = JineAssets.Ui.BUTTON_MINIMIZE,
                 modifier = Modifier.size(iconSize),
-                contentDescription = "Minimize"
+                contentDescription = localizedStringResource(R.string.chat_window_minimize)
             )
 
             PixelImage(
                 path = JineAssets.Ui.BUTTON_MAXIMIZE,
                 modifier = Modifier.size(iconSize),
-                contentDescription = "Maximize"
+                contentDescription = localizedStringResource(R.string.chat_window_maximize)
             )
 
             PixelImage(
                 path = JineAssets.Ui.BUTTON_CLOSE,
                 modifier = Modifier.size(iconSize),
-                contentDescription = "Close"
+                contentDescription = localizedStringResource(R.string.chat_window_close)
             )
         }
     }

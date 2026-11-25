@@ -1,0 +1,11 @@
+<resources>
+    <string name="chat_window_icon">JINE icon</string>
+    <string name="chat_window_minimize">Minimize</string>
+    <string name="chat_window_maximize">Maximize</string>
+    <string name="chat_window_close">Close</string>
+    <string name="chat_ame_avatar">Ame-chan avatar</string>
+    <string name="sticker_catalog_error">Could not load stickers.</string>
+    <string name="sticker_catalog_empty">No stickers available.</string>
+    <string name="sticker_selected">Sticker selected</string>
+    <string name="sticker_not_selected">Not selected</string>
+</resources>

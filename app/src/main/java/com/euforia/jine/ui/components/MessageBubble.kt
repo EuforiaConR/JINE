@@ -11,7 +11,9 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.euforia.jine.R
 import com.euforia.jine.core.assets.JineAssets
+import com.euforia.jine.core.localization.localizedStringResource
 import com.euforia.jine.ui.theme.JineBubble
 import com.euforia.jine.ui.theme.JineText
 import com.euforia.jine.ui.theme.ZpixFont
@@ -65,7 +67,7 @@ fun ReceivedMessage(
         PixelImage(
             path = JineAssets.Avatars.AME,
             modifier = Modifier.size(32.dp),
-            contentDescription = "Ame-chan"
+            contentDescription = localizedStringResource(R.string.chat_ame_avatar)
         )
 
         Spacer(

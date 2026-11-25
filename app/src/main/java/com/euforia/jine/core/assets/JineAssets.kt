@@ -24,8 +24,15 @@ object JineAssets {
         const val AME = "textures/avatars/icon_jine_ame.png"
     }
 
+    object Languages {
+        const val SPANISH = "lang/es.json"
+        const val ENGLISH = "lang/en.json"
+    }
+
     object Stickers {
-        const val PCHAN_DIRECTORY = "textures/stickers/pchan"
-        const val AME_DIRECTORY = "textures/stickers/ame"
+        const val TEXTURES_DIRECTORY = "textures/stickers"
+        const val PCHAN_DIRECTORY = "$TEXTURES_DIRECTORY/pchan"
+        const val AME_DIRECTORY = "$TEXTURES_DIRECTORY/ame"
+        const val PCHAN_CATALOG = "stickers/pchan.json"
     }
 }

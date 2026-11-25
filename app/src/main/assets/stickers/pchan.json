@@ -1,0 +1,61 @@
+{
+  "id": "pchan",
+  "stickers": [
+    {
+      "id": "ok",
+      "texture": "textures/stickers/pchan/sticker_pchan_ok.png",
+      "description_key": "sticker.pchan.ok",
+      "emotion": "agreement",
+      "order": 0
+    },
+    {
+      "id": "love",
+      "texture": "textures/stickers/pchan/sticker_pchan_love.png",
+      "description_key": "sticker.pchan.love",
+      "emotion": "affection",
+      "order": 1
+    },
+    {
+      "id": "gomen",
+      "texture": "textures/stickers/pchan/sticker_pchan_gomen.png",
+      "description_key": "sticker.pchan.gomen",
+      "emotion": "apology",
+      "order": 2
+    },
+    {
+      "id": "pien",
+      "texture": "textures/stickers/pchan/sticker_pchan_pien.png",
+      "description_key": "sticker.pchan.pien",
+      "emotion": "sadness",
+      "order": 3
+    },
+    {
+      "id": "sorena",
+      "texture": "textures/stickers/pchan/sticker_pchan_sorena.png",
+      "description_key": "sticker.pchan.sorena",
+      "emotion": "agreement",
+      "order": 4
+    },
+    {
+      "id": "waritodoudemoii",
+      "texture": "textures/stickers/pchan/sticker_pchan_waritodoudemoii.png",
+      "description_key": "sticker.pchan.waritodoudemoii",
+      "emotion": "indifference",
+      "order": 5
+    },
+    {
+      "id": "bujisyuuryou",
+      "texture": "textures/stickers/pchan/sticker_pchan_bujisyuuryou.png",
+      "description_key": "sticker.pchan.bujisyuuryou",
+      "emotion": "relief",
+      "order": 6
+    },
+    {
+      "id": "saikouka",
+      "texture": "textures/stickers/pchan/sticker_saikouka.png",
+      "description_key": "sticker.pchan.saikouka",
+      "emotion": "enthusiasm",
+      "order": 7
+    }
+  ]
+}

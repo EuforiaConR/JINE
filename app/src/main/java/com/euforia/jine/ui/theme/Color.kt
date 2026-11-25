@@ -16,3 +16,4 @@ val JineScrollbar = JineBubble
 
 val JineChatBackground = Color(0xFFEE97ED)
 val JineWindowOuter = Color(0xFFE9F5F6)
+val JineStickerPanel = Color(0xE0CDA9DA)
