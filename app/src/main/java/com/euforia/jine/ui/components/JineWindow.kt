@@ -7,7 +7,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.unit.dp
-import com.euforia.jine.R
+import com.euforia.jine.core.assets.JineAssets
 import com.euforia.jine.ui.theme.JineWindowOuter
 
 internal const val JINE_UI_SCALE = 1f
@@ -28,7 +28,7 @@ fun JineWindow(
 
         // Marco original de la ventana.
         NineSliceImage(
-            resourceId = R.drawable.windowbase_active,
+            path = JineAssets.Ui.WINDOW_BASE,
             slices = NineSliceInsets(
                 left = 8,
                 top = 42,

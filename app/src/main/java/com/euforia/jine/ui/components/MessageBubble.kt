@@ -1,6 +1,5 @@
 package com.euforia.jine.ui.components
 
-import com.euforia.jine.ui.theme.pixelFontSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.Text
@@ -12,10 +11,11 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.euforia.jine.R
+import com.euforia.jine.core.assets.JineAssets
 import com.euforia.jine.ui.theme.JineBubble
 import com.euforia.jine.ui.theme.JineText
 import com.euforia.jine.ui.theme.ZpixFont
+import com.euforia.jine.ui.theme.pixelFontSize
 
 private const val DIALOGUE_SCALE = 1f
 
@@ -30,7 +30,7 @@ fun MessageBubble(
     ) {
 
         NineSliceImage(
-            resourceId = R.drawable.balloon_dialogue,
+            path = JineAssets.Dialogue.BALLOON,
             slices = NineSliceInsets(7),
             modifier = Modifier.matchParentSize(),
             scale = DIALOGUE_SCALE,
@@ -63,7 +63,7 @@ fun ReceivedMessage(
     ) {
 
         PixelImage(
-            resourceId = R.drawable.icon_jine_ame,
+            path = JineAssets.Avatars.AME,
             modifier = Modifier.size(32.dp),
             contentDescription = "Ame-chan"
         )
@@ -82,7 +82,7 @@ fun ReceivedMessage(
             )
 
             PixelImage(
-                resourceId = R.drawable.tail_dialogue,
+                path = JineAssets.Dialogue.TAIL,
                 modifier = Modifier
                     .align(Alignment.TopStart)
                     .offset(

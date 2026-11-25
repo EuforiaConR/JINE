@@ -1,26 +1,26 @@
 package com.euforia.jine.ui.components
 
-import androidx.annotation.DrawableRes
 import androidx.compose.foundation.Image
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.FilterQuality
-import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.res.imageResource
+import com.euforia.jine.core.assets.rememberAssetTexture
 
 @Composable
 fun PixelImage(
-    @DrawableRes resourceId: Int,
+    path: String,
     modifier: Modifier = Modifier,
     contentDescription: String? = null,
     tint: Color? = null,
     contentScale: ContentScale = ContentScale.Fit
 ) {
+    val bitmap = rememberAssetTexture(path)
+
     Image(
-        bitmap = ImageBitmap.imageResource(resourceId),
+        bitmap = bitmap,
         contentDescription = contentDescription,
         modifier = modifier,
         contentScale = contentScale,

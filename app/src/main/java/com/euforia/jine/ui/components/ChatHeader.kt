@@ -7,7 +7,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.euforia.jine.R
+import com.euforia.jine.core.assets.JineAssets
 import com.euforia.jine.ui.theme.JineText
 import com.euforia.jine.ui.theme.ZpixFont
 import com.euforia.jine.ui.theme.pixelFontSize
@@ -26,7 +26,7 @@ fun ChatHeader(
     ) {
 
         PixelImage(
-            resourceId = R.drawable.windowbase_icon,
+            path = JineAssets.Ui.WINDOW_ICON,
             modifier = Modifier.size(iconSize),
             contentDescription = "JINE icon"
         )
@@ -54,19 +54,19 @@ fun ChatHeader(
             verticalAlignment = Alignment.CenterVertically
         ) {
             PixelImage(
-                resourceId = R.drawable.button_minimize,
+                path = JineAssets.Ui.BUTTON_MINIMIZE,
                 modifier = Modifier.size(iconSize),
                 contentDescription = "Minimize"
             )
 
             PixelImage(
-                resourceId = R.drawable.button_maximize,
+                path = JineAssets.Ui.BUTTON_MAXIMIZE,
                 modifier = Modifier.size(iconSize),
                 contentDescription = "Maximize"
             )
 
             PixelImage(
-                resourceId = R.drawable.button_close,
+                path = JineAssets.Ui.BUTTON_CLOSE,
                 modifier = Modifier.size(iconSize),
                 contentDescription = "Close"
             )

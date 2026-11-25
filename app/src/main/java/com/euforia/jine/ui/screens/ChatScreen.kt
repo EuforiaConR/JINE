@@ -7,7 +7,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import com.euforia.jine.R
+import com.euforia.jine.core.assets.JineAssets
 import com.euforia.jine.ui.components.ChatHeader
 import com.euforia.jine.ui.components.JineWindow
 import com.euforia.jine.ui.components.PixelTiledImage
@@ -31,7 +31,7 @@ fun ChatScreen() {
     ) {
 
         PixelTiledImage(
-            resourceId = R.drawable.jine_bg,
+            path = JineAssets.Backgrounds.JINE,
             modifier = Modifier.matchParentSize(),
             scale = JINE_UI_SCALE
         )

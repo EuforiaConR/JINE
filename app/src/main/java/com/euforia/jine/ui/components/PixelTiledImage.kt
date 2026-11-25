@@ -1,25 +1,23 @@
 package com.euforia.jine.ui.components
 
-import androidx.annotation.DrawableRes
 import androidx.compose.foundation.Canvas
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.FilterQuality
-import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.res.imageResource
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import com.euforia.jine.core.assets.rememberAssetTexture
 import kotlin.math.roundToInt
 
 @Composable
 fun PixelTiledImage(
-    @DrawableRes resourceId: Int,
+    path: String,
     modifier: Modifier = Modifier,
     scale: Float = 1f
 ) {
-    val bitmap = ImageBitmap.imageResource(resourceId)
+    val bitmap = rememberAssetTexture(path)
 
     require(scale.isFinite() && scale > 0f)
 
