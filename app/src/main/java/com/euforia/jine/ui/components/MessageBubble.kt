@@ -27,9 +27,9 @@ fun MessageBubble(
 
         NineSliceImage(
             resourceId = R.drawable.balloon_dialogue,
-            slices = NineSliceInsets(3),
+            slices = NineSliceInsets(7),
             modifier = Modifier.matchParentSize(),
-            scale = 2f,
+            scale = 1f,
             tint = bubbleColor
         )
 
