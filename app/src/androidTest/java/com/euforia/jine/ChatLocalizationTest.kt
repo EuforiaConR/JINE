@@ -17,6 +17,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
@@ -166,7 +167,7 @@ class ChatLocalizationTest {
                 }
             }
 
-            scrollForwardFrom(awaitPickerSticker("ok", "De acuerdo"))
+            scrollPickerToLastRow()
             val lastSticker = awaitPickerSticker("sorena", "Esto.").stickerControl()
             assertTrue(lastSticker.performAction(AccessibilityNodeInfo.ACTION_CLICK))
             awaitPickerSticker("sorena", "Esto.", selected = true)
@@ -257,7 +258,7 @@ class ChatLocalizationTest {
     }
 
     @Test
-    fun activeBatchSurvivesRecreationAndLocalizesWhileThePickerIsLocked() {
+    fun activeBatchesSurviveRecreationAndAcceptStickersDuringAReaction() {
         val scheduler = TestCoroutineScheduler()
         val factory = controlledChatFactory(scheduler)
         val language = mutableStateOf("es")
@@ -276,12 +277,11 @@ class ChatLocalizationTest {
             tap(awaitPickerSticker("love", "Que viva el amor", selected = false))
             tap(awaitPickerSticker("love", "Que viva el amor", selected = true))
             awaitMessage("Que viva el amor", "timed-1")
+            assertEquals(CommunicationState.READING, chat.uiState.value.communicationState)
             assertNull(findNodeInTag("${CHAT_MESSAGE_TAG_PREFIX}timed-1") { it.text?.toString() == "Leído" })
 
-            advanceChat(scenario, scheduler, 350)
-            tap(awaitPickerSticker("ok", "De acuerdo", selected = false))
-            tap(awaitPickerSticker("ok", "De acuerdo", selected = true))
-            awaitMessage("De acuerdo", "timed-2")
+            advanceChat(scenario, scheduler, 800)
+            awaitMessage("Leído", "timed-1")
             tap(awaitPickerSticker("gomen", "Lo siento", selected = false))
             awaitPickerSticker("gomen", "Lo siento", selected = true)
             val beforeRecreation = chat.uiState.value
@@ -290,41 +290,54 @@ class ChatLocalizationTest {
             scenario.onActivity { assertSame(chat, showChat(it)) }
             awaitPickerSticker("gomen", "Lo siento", selected = true)
             assertEquals(beforeRecreation, chat.uiState.value)
-            assertEquals(previewIds + listOf("timed-1", "timed-2"), chat.messageIds())
+            assertEquals(previewIds + "timed-1", chat.messageIds())
 
-            advanceChat(scenario, scheduler, 450)
-            awaitMessage("Leído", "timed-1")
-            assertNull(findNodeInTag("${CHAT_MESSAGE_TAG_PREFIX}timed-2") { it.text?.toString() == "Leído" })
+            advanceChat(scenario, scheduler, 600)
+            awaitMessage("<3 <3 <3", "timed-2")
+            assertEquals(CommunicationState.RESPONDING, chat.uiState.value.communicationState)
+            val selectedDuringReply = awaitPickerSticker("gomen", "Lo siento", selected = true)
+            assertTrue(selectedDuringReply.stickerControl().isEnabled)
+            tap(selectedDuringReply)
+            awaitMessage("Lo siento", "timed-3")
+            awaitInReadingArea("timed-3")
+            assertEquals(previewIds + (1..3).map { "timed-$it" }, chat.messageIds())
+            assertEquals(CommunicationState.RESPONDING, chat.uiState.value.communicationState)
 
             advanceChat(scenario, scheduler, 200)
-            val locked = awaitPickerSticker("gomen", "Lo siento", selected = false)
-            assertEquals(CommunicationState.RESPONDING, chat.uiState.value.communicationState)
-            assertFalse(locked.stickerControl().isEnabled)
-            val blockedState = chat.uiState.value
-            tap(locked)
+            tap(awaitPickerSticker("ok", "De acuerdo", selected = false))
+            tap(awaitPickerSticker("ok", "De acuerdo", selected = true))
+            awaitMessage("De acuerdo", "timed-4")
+            val beforeLanguageChange = chat.uiState.value
             scenario.onActivity {
-                assertEquals(listOf("love", "love", "ok", "ok", "gomen"), presses)
-                assertEquals(blockedState, chat.uiState.value)
+                assertEquals(listOf("love", "love", "gomen", "gomen", "ok", "ok"), presses)
                 language.value = "en"
             }
-            awaitMessage("Are you there?", "preview_question")
+            awaitNode("Minimize")
             awaitMessage("Love forever", "timed-1")
             awaitMessage("Read", "timed-1")
-            assertEquals(blockedState, chat.uiState.value)
+            awaitMessage("Sorry", "timed-3")
+            awaitMessage("Okay", "timed-4")
+            assertEquals(beforeLanguageChange, chat.uiState.value)
 
-            advanceChat(scenario, scheduler, 150)
-            awaitMessage("Read", "timed-2")
-            advanceChat(scenario, scheduler, 600)
-            awaitMessage("<3 <3 <3", "timed-3")
-            assertFalse(awaitPickerSticker("ok", "Okay").stickerControl().isEnabled)
-            advanceChat(scenario, scheduler, 500)
-            awaitMessage("i have so much to tell you today", "timed-4")
-            assertFalse(awaitPickerSticker("ok", "Okay").stickerControl().isEnabled)
-            advanceChat(scenario, scheduler, 600)
-            awaitMessage("okaaaay", "timed-5")
-            assertTrue(awaitPickerSticker("ok", "Okay").stickerControl().isEnabled)
-            assertEquals(CommunicationState.AVAILABLE, chat.uiState.value.communicationState)
+            advanceChat(scenario, scheduler, 300)
+            awaitMessage("i have so much to tell you today", "timed-5")
+            assertEquals(CommunicationState.READING, chat.uiState.value.communicationState)
+            advanceChat(scenario, scheduler, 300)
+            awaitMessage("Read", "timed-3")
+            assertNull(findNodeInTag("${CHAT_MESSAGE_TAG_PREFIX}timed-4") { it.text?.toString() == "Read" })
+            advanceChat(scenario, scheduler, 200)
+            awaitMessage("Read", "timed-4")
+            advanceChat(scenario, scheduler, 599)
             assertEquals(previewIds + (1..5).map { "timed-$it" }, chat.messageIds())
+            advanceChat(scenario, scheduler, 1)
+            awaitMessage("hahaha what are you trying to tell me?", "timed-6")
+            awaitInReadingArea("timed-6")
+            assertEquals(CommunicationState.AVAILABLE, chat.uiState.value.communicationState)
+            assertEquals(previewIds + (1..6).map { "timed-$it" }, chat.messageIds())
+            assertEquals(
+                listOf("dialogue.demo.reply.love.01", "dialogue.demo.reply.love.02", "dialogue.demo.batch.mixed.01"),
+                chat.uiState.value.messages.drop(3).mapNotNull { (it.content as? MessageContent.Text)?.textKey }
+            )
         }
     }
 
@@ -361,35 +374,34 @@ class ChatLocalizationTest {
             val love = chat.messageIds().last()
             awaitMessage("Que viva el amor", love)
             awaitInReadingArea(love)
-            advanceChat(scenario, scheduler, 350)
-            tap(awaitPickerSticker("ok", "De acuerdo", selected = false))
-            tap(awaitPickerSticker("ok", "De acuerdo", selected = true))
-            val ok = chat.messageIds().last()
-            awaitMessage("De acuerdo", ok)
-            awaitInReadingArea(ok)
-            advanceChat(scenario, scheduler, 450)
+            advanceChat(scenario, scheduler, 800)
             awaitMessage("Leído", love)
-            awaitInReadingArea(ok)
-            assertNull(findNodeInTag("$CHAT_MESSAGE_TAG_PREFIX$ok") { it.text?.toString() == "Leído" })
-            advanceChat(scenario, scheduler, 350)
-            awaitMessage("Leído", ok)
-            awaitInReadingArea(ok)
+            awaitInReadingArea(love)
 
             advanceChat(scenario, scheduler, 600)
             val firstReply = chat.messageIds().last()
             awaitMessage("<3 <3 <3", firstReply)
             val end = awaitInReadingArea(firstReply)
-            val lockedPicker = awaitPickerSticker("ok", "De acuerdo")
-            assertFalse(lockedPicker.stickerControl().isEnabled)
-            tap(lockedPicker)
+            val activePicker = awaitPickerSticker("ok", "De acuerdo", selected = false)
+            assertTrue(activePicker.stickerControl().isEnabled)
+            tap(activePicker)
+            awaitPickerSticker("ok", "De acuerdo", selected = true)
+            assertEquals(firstReply, chat.messageIds().last())
             val panel = panelBounds()
             swipe(panel.left + 2, panel.top + 16, panel.bottom - 16)
             assertEquals(end, awaitInReadingArea(firstReply))
+            assertEquals(listOf("love", "love", "ok"), presses)
+
+            tap(awaitPickerSticker("ok", "De acuerdo", selected = true))
+            val ok = chat.messageIds().last()
+            awaitMessage("De acuerdo", ok)
+            awaitInReadingArea(ok)
+            assertNull(findNodeInTag("$CHAT_MESSAGE_TAG_PREFIX$ok") { it.text?.toString() == "Leído" })
             assertEquals(listOf("love", "love", "ok", "ok"), presses)
 
             swipeHistory(towardEnd = false)
-            awaitValue("last reply out of the reading area") {
-                Unit.takeIf { rowInReadingArea(firstReply) == null }
+            awaitValue("last send out of the reading area") {
+                Unit.takeIf { rowInReadingArea(ok) == null }
             }
             val (anchorId, anchorBounds) = firstReadableRow()
             val beforeRecreation = chat.uiState.value
@@ -410,6 +422,9 @@ class ChatLocalizationTest {
 
             scrollHistoryToBoundary(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD, secondReply)
             awaitMessage("i have so much to tell you today", secondReply)
+            awaitInReadingArea(secondReply)
+            advanceChat(scenario, scheduler, 300)
+            awaitMessage("Read", ok)
             awaitInReadingArea(secondReply)
             advanceChat(scenario, scheduler, 600)
             val finalReply = chat.messageIds().last()
@@ -486,7 +501,7 @@ class ChatLocalizationTest {
             awaitInReadingArea(history.last().id)
             val compactPanel = panelBounds()
             assertEquals(compactPanel.top, scrollbarBounds().bottom)
-            scrollForwardFrom(awaitPickerSticker("ok", "De acuerdo"))
+            scrollPickerToLastRow()
             awaitPickerSticker("sorena", "Esto.")
             awaitInReadingArea(history.last().id)
 
@@ -562,15 +577,17 @@ class ChatLocalizationTest {
         ActivityScenario.launch(ComponentActivity::class.java).use { scenario ->
             scenario.onActivity { activity ->
                 activity.setContent {
-                    ProvideLocalizedResources("en") {
-                        StickerPicker(
-                            stickers = stickers,
-                            selectedStickerId = stickers.single().id,
-                            onStickerSelected = selected::add,
-                            descriptionFor = { "Okay" },
-                            enabled = false,
-                            language = JineLanguageManager.ENGLISH
-                        )
+                    Box(Modifier.safeDrawingPadding()) {
+                        ProvideLocalizedResources("en") {
+                            StickerPicker(
+                                stickers = stickers,
+                                selectedStickerId = stickers.single().id,
+                                onStickerSelected = selected::add,
+                                descriptionFor = { "Okay" },
+                                enabled = false,
+                                language = JineLanguageManager.ENGLISH
+                            )
+                        }
                     }
                 }
             }
@@ -600,7 +617,7 @@ class ChatLocalizationTest {
         return viewModelFactory {
             initializer {
                 ChatViewModel(
-                    timings = ChatTimings(admissionMs = 1_000, readMs = 800, replyPreparationMs = 600, replyIntervalMs = 500),
+                    timings = ChatTimings(readMs = 800, replyPreparationMs = 600, replyIntervalMs = 500),
                     now = { 1_700_000_000_000L + scheduler.currentTime },
                     newMessageId = { "timed-${++nextId}" },
                     dispatcher = StandardTestDispatcher(scheduler)
@@ -792,14 +809,17 @@ class ChatLocalizationTest {
     @Suppress("DEPRECATION") // Android maps selected controls other than tabs to checked.
     private fun AccessibilityNodeInfo.isStickerSelected() = stickerControl().isChecked
 
-    private fun scrollForwardFrom(node: AccessibilityNodeInfo) {
-        var ancestor = node.parent
-        while (ancestor != null && !ancestor.isScrollable) {
-            ancestor = ancestor.parent
+    private fun scrollPickerToLastRow() {
+        val column = boundsOf(awaitPickerSticker("ok", "De acuerdo"))
+        val panel = panelBounds()
+        val inset = panel.height() / 8
+        repeat(4) {
+            if (findNodeInTag("${PICKER_STICKER_TAG_PREFIX}sorena") { it.contentDescription?.toString() == "Esto." } != null) {
+                return
+            }
+            swipe(column.centerX(), panel.bottom - inset, panel.top + inset)
         }
-        assertTrue("Expected a scrollable container", ancestor != null)
-        assertTrue(ancestor?.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD) == true)
-        instrumentation.uiAutomation.waitForIdle(250, 5_000)
+        awaitPickerSticker("sorena", "Esto.")
     }
 
     private fun tap(node: AccessibilityNodeInfo) {

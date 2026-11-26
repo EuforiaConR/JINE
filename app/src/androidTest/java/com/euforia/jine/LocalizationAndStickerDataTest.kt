@@ -6,9 +6,14 @@ import com.euforia.jine.core.assets.JineAssetManager
 import com.euforia.jine.core.assets.JineAssets
 import com.euforia.jine.core.localization.JineLanguageManager
 import com.euforia.jine.core.localization.LocalizationContentException
+import com.euforia.jine.data.model.Message
+import com.euforia.jine.data.model.MessageContent
+import com.euforia.jine.data.model.MessageSender
+import com.euforia.jine.data.model.PCHAN_PACK_ID
 import com.euforia.jine.data.repository.StickerCatalogException
 import com.euforia.jine.data.repository.StickerRepository
 import com.euforia.jine.ui.screens.GENERIC_DEMO_REPLY
+import com.euforia.jine.ui.screens.StickerBatch
 import com.euforia.jine.ui.screens.demoReplies
 import org.json.JSONArray
 import org.json.JSONObject
@@ -56,8 +61,20 @@ class LocalizationAndStickerDataTest {
 
     @Test
     fun everyDemoReplyHasItsOwnTranslationInBothAssetCatalogs() {
-        val keys = StickerRepository.load(context).flatMap { demoReplies(it.id) } + GENERIC_DEMO_REPLY
-        assertEquals(10, keys.distinct().size)
+        val singleBatches = StickerRepository.load(context).map { listOf(it.id) }
+        val groupedBatches = listOf(
+            listOf("love", "love"),
+            listOf("ok", "ok"),
+            listOf("ok", "gomen"),
+            List(5) { "ok" }
+        )
+        val keys = (singleBatches + groupedBatches).flatMap { ids ->
+            val messages = ids.mapIndexed { index, id ->
+                Message("send-$index", MessageSender.PCHAN, MessageContent.Sticker(PCHAN_PACK_ID, id), 0L, 650L)
+            }
+            demoReplies(StickerBatch(messages))
+        } + GENERIC_DEMO_REPLY
+        assertEquals(14, keys.distinct().size)
         for (path in listOf(JineAssets.Languages.SPANISH, JineAssets.Languages.ENGLISH)) {
             val catalog = JSONObject(JineAssetManager.getText(context, path))
             for (key in keys) {

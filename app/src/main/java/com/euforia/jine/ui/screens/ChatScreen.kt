@@ -207,7 +207,7 @@ private fun ChatScreenEnglishPreview() {
     ChatContent(ChatUiState(initialMessages(0L)), JineLanguageManager.ENGLISH, rememberStickerCatalog())
 }
 
-@Preview(name = "Ame respondiendo", showBackground = true, widthDp = 360, heightDp = 780)
+@Preview(name = "Ame respondiendo · selector activo", showBackground = true, widthDp = 360, heightDp = 780)
 @Composable
 private fun ChatRespondingPreview() {
     val read = Message(
@@ -225,7 +225,12 @@ private fun ChatRespondingPreview() {
     )
     ChatContent(
         uiState = ChatUiState(
-            messages = initialMessages(0L) + listOf(read, unread),
+            messages = initialMessages(0L) + listOf(
+                read,
+                Message("preview_batch_reply", MessageSender.AME, MessageContent.Text("dialogue.demo.reply.love.01"), 3L),
+                unread.copy(sentAt = 4L)
+            ),
+            selectedStickerId = "gomen",
             communicationState = CommunicationState.RESPONDING
         ),
         language = JineLanguageManager.DEFAULT_LANGUAGE,

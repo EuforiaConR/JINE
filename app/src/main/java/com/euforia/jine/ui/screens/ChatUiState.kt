@@ -15,8 +15,9 @@ internal data class ChatUiState(
     val selectedStickerId: String? = null,
     val communicationState: CommunicationState = CommunicationState.AVAILABLE
 ) {
+    // Free chat accepts input in every processing state.
     val canSendSticker: Boolean
-        get() = communicationState != CommunicationState.RESPONDING
+        get() = true
 }
 
 internal fun initialMessages(sentAt: Long): List<Message> {
