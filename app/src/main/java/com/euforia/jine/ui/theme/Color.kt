@@ -12,6 +12,7 @@ val Pink40 = Color(0xFF7D5260)
 
 val JineText = Color(0xFF4F1CD1)
 val JineBubble = Color(0xFFCCE4FB)
+val JineSentBubble = Color(0xFF4AEE53)
 val JineScrollbarThumb = Color(0xFFEA9FE7)
 val JineScrollbarTrack = Color(0xFFCCECFB)
 val JineReadReceipt = Color(0xFFFDFDFD)
@@ -19,3 +20,4 @@ val JineReadReceipt = Color(0xFFFDFDFD)
 val JineChatBackground = Color(0xFFEE97ED)
 val JineWindowOuter = Color(0xFFE9F5F6)
 val JineStickerOverlay = Color(0xFFAA9DCE)
+internal const val JINE_PANEL_OVERLAY_ALPHA = 0.45f

@@ -58,6 +58,7 @@ internal class ChatViewModel(
     fun sendSticker(stickerId: String, validStickerIds: Set<String>): Boolean {
         if (!viewModelScope.isActive) return false
         val state = _uiState.value
+        if (!state.canSendSticker) return false
         val message = createStickerMessage(stickerId, validStickerIds, newMessageId, now) ?: return false
 
         val reading = viewModelScope.launch(dispatcher, start = CoroutineStart.LAZY) {

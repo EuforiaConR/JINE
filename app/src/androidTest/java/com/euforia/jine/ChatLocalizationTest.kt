@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -43,6 +44,8 @@ import com.euforia.jine.data.model.Sticker
 import com.euforia.jine.data.repository.StickerRepository
 import com.euforia.jine.ui.components.CHAT_MESSAGE_TAG_PREFIX
 import com.euforia.jine.ui.components.CHAT_HISTORY_TAG
+import com.euforia.jine.ui.components.CHAT_CHOICE_PANEL_TAG
+import com.euforia.jine.ui.components.CHAT_CHOICE_TAG_PREFIX
 import com.euforia.jine.ui.components.CHAT_SCROLLBAR_TAG
 import com.euforia.jine.ui.components.ChatMessageItem
 import com.euforia.jine.ui.components.PICKER_STICKER_TAG_PREFIX
@@ -51,12 +54,15 @@ import com.euforia.jine.ui.components.StickerPicker
 import com.euforia.jine.ui.screens.ChatScreen
 import com.euforia.jine.ui.screens.CHAT_PANEL_TAG
 import com.euforia.jine.ui.screens.ChatContent
+import com.euforia.jine.ui.screens.ChatInputMode
 import com.euforia.jine.ui.screens.ChatTimings
 import com.euforia.jine.ui.screens.ChatUiState
 import com.euforia.jine.ui.screens.ChatViewModel
 import com.euforia.jine.ui.screens.CommunicationState
+import com.euforia.jine.ui.screens.DialogueChoice
 import com.euforia.jine.ui.screens.initialMessages
 import com.euforia.jine.ui.theme.JineChatBackground
+import com.euforia.jine.ui.theme.JineSentBubble
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestCoroutineScheduler
@@ -78,6 +84,12 @@ class ChatLocalizationTest {
     private val instrumentation get() = InstrumentationRegistry.getInstrumentation()
     private val context get() = instrumentation.targetContext
     private val previewIds = listOf("preview_greeting", "preview_question", "preview_long_message")
+    private val gaming = DialogueChoice("gaming", "dialogue.preview.narrative.choice.gaming")
+    private val talking = DialogueChoice("talking", "dialogue.preview.narrative.choice.talking")
+    private val longChoice = DialogueChoice("long", "dialogue.preview.narrative.choice.long")
+    private val gamingEs = "¡Un directo de videojuegos!"
+    private val talkingEs = "¡Un directo para conversar!"
+    private val longChoiceEs = "Podríamos probar un juego tranquilo, charlar con el público y preparar juntos una lista de ideas para el siguiente directo."
 
     @Before
     fun exposeAccessibilityResourceIds() {
@@ -175,8 +187,15 @@ class ChatLocalizationTest {
                 }
             }
             awaitInReadingArea("preview_greeting")
-            swipeHistory(towardEnd = true)
-            awaitNode(lastMessage)
+            repeat(4) {
+                val longRow = findNodeInTag("${CHAT_MESSAGE_TAG_PREFIX}preview_long_message") {
+                    it.text?.toString() == lastMessage
+                }
+                if (longRow == null || rowInReadingArea("preview_long_message", wholeRow = false) == null) {
+                    swipeHistory(towardEnd = true)
+                }
+            }
+            awaitMessage(lastMessage, "preview_long_message")
             awaitInReadingArea("preview_long_message", wholeRow = false)
             val lastSticker = awaitPickerSticker("sorena", "Esto.")
             assertTrue(lastSticker.performAction(AccessibilityNodeInfo.ACTION_CLICK))
@@ -518,6 +537,215 @@ class ChatLocalizationTest {
     }
 
     @Test
+    fun panelModesKeepTheLatestRowVisibleAndDeliverOnlyExplicitChoices() {
+        val history = narrativeHistory()
+        val state = mutableStateOf(ChatUiState(history))
+        val language = mutableStateOf("es")
+        val stickers = StickerRepository.load(context)
+        val events = mutableListOf<Pair<String, String>>()
+        val options = listOf(gaming, talking)
+        ActivityScenario.launch(ComponentActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                activity.setContent {
+                    ChatContent(
+                        uiState = state.value,
+                        language = language.value,
+                        stickers = stickers,
+                        onChoicePressed = { promptId, choiceId ->
+                            events.add(promptId to choiceId)
+                            val choice = options.single { it.id == choiceId }
+                            state.value = state.value.copy(
+                                messages = state.value.messages + sentChoice("sent-$promptId", choice),
+                                inputMode = ChatInputMode.Hidden
+                            )
+                        }
+                    )
+                }
+            }
+            awaitPickerSticker("love", "Que viva el amor")
+            val stickerPanel = awaitScrollbarAtPanel(CHAT_PANEL_TAG)
+            awaitInReadingArea(history.last().id)
+            scenario.onActivity { state.value = state.value.copy(inputMode = ChatInputMode.Hidden) }
+            awaitHiddenPanel()
+            awaitInReadingArea(history.last().id)
+
+            scenario.onActivity { state.value = state.value.copy(inputMode = ChatInputMode.Choices("first", options)) }
+            val first = awaitChoice(gaming, gamingEs)
+            val nextBounds = boundsOf(awaitChoice(talking, talkingEs))
+            assertTrue(first.isClickable)
+            assertFalse(first.isCheckable)
+            assertTrue(first.findNode { it.className == "android.widget.Button" } != null)
+            val choicePanel = awaitScrollbarAtPanel(CHAT_CHOICE_PANEL_TAG)
+            assertEquals(stickerPanel, choicePanel)
+            assertNull(findVisibleNode { it.viewIdResourceName == CHAT_PANEL_TAG })
+            awaitInReadingArea(history.last().id)
+            val firstBounds = boundsOf(first)
+            assertTrue(JineSentBubble.toArgb() in capturePixels(scenario, firstBounds))
+            tap(choicePanel.left + 8f, firstBounds.exactCenterY())
+            assertTrue(firstBounds.bottom < nextBounds.top)
+            tap(nextBounds.exactCenterX(), (firstBounds.bottom + nextBounds.top) / 2f)
+            val down = SystemClock.uptimeMillis()
+            sendPointer(down, MotionEvent.ACTION_DOWN, firstBounds.exactCenterX(), firstBounds.exactCenterY())
+            sendPointer(down, MotionEvent.ACTION_CANCEL, firstBounds.exactCenterX(), firstBounds.exactCenterY())
+            scenario.onActivity { assertTrue(events.isEmpty()) }
+            awaitInReadingArea(history.last().id)
+            tap(first)
+            awaitHiddenPanel()
+            awaitMessage(gamingEs, "sent-first")
+            awaitInReadingArea("sent-first")
+            scenario.onActivity {
+                assertEquals(listOf("first" to "gaming"), events)
+                assertEquals(history + sentChoice("sent-first", gaming), state.value.messages)
+                state.value = state.value.copy(inputMode = ChatInputMode.Choices("second", options))
+            }
+            awaitChoice(talking, talkingEs)
+            awaitScrollbarAtPanel(CHAT_CHOICE_PANEL_TAG)
+            val beforeLocaleChange = state.value
+            scenario.onActivity { language.value = "en" }
+            val second = awaitChoice(talking, "A chatting stream!")
+            awaitMessage("A gaming stream!", "sent-first")
+            assertEquals(beforeLocaleChange, state.value)
+            scenario.onActivity { assertEquals(listOf("first" to "gaming"), events) }
+            assertTrue(second.performAction(AccessibilityNodeInfo.ACTION_CLICK))
+            awaitHiddenPanel()
+            awaitMessage("A chatting stream!", "sent-second")
+            scenario.onActivity {
+                assertEquals(listOf("first" to "gaming", "second" to "talking"), events)
+                state.value = state.value.copy(inputMode = ChatInputMode.Stickers)
+            }
+            awaitPickerSticker("love", "Love forever")
+            assertEquals(stickerPanel, awaitScrollbarAtPanel(CHAT_PANEL_TAG))
+            assertNull(findVisibleNode { it.viewIdResourceName == CHAT_CHOICE_PANEL_TAG })
+            awaitInReadingArea("sent-second")
+            assertEquals(history + sentChoice("sent-first", gaming) + sentChoice("sent-second", talking), state.value.messages)
+        }
+    }
+
+    @Test
+    fun hiddenPanelReleasesGesturesAndModeChangesPreserveTheAnchorUntilPchanSends() {
+        val history = narrativeHistory()
+        val state = mutableStateOf(ChatUiState(history, inputMode = ChatInputMode.Choices("anchor", listOf(gaming))))
+        val stickers = StickerRepository.load(context)
+        ActivityScenario.launch(ComponentActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                activity.setContent { ChatContent(state.value, "es", stickers) }
+            }
+            awaitInReadingArea(history.last().id)
+            val panel = awaitScrollbarAtPanel(CHAT_CHOICE_PANEL_TAG)
+            scenario.onActivity { state.value = state.value.copy(inputMode = ChatInputMode.Hidden) }
+            awaitHiddenPanel()
+            awaitInReadingArea(history.last().id)
+            swipe(panel.centerX(), panel.top + panel.height() / 8, panel.bottom - panel.height() / 8)
+            awaitValue("earlier history after swiping the former panel") {
+                Unit.takeIf { rowInReadingArea(history.last().id) == null }
+            }
+            val (anchor, position) = firstReadableRow()
+
+            scenario.onActivity { state.value = state.value.copy(inputMode = ChatInputMode.Stickers) }
+            awaitScrollbarAtPanel(CHAT_PANEL_TAG)
+            assertEquals(position, awaitInReadingArea(anchor))
+            val ame = Message("new-ame", MessageSender.AME, MessageContent.Text("dialogue.preview.narrative.reply"), 1L)
+            scenario.onActivity {
+                state.value = state.value.copy(
+                    messages = state.value.messages + ame,
+                    inputMode = ChatInputMode.Choices("after-ame", listOf(gaming))
+                )
+            }
+            awaitChoice(gaming, gamingEs)
+            awaitScrollbarAtPanel(CHAT_CHOICE_PANEL_TAG)
+            assertEquals(position, awaitInReadingArea(anchor))
+            assertNull(rowInReadingArea(ame.id))
+
+            scenario.onActivity {
+                state.value = state.value.copy(
+                    messages = state.value.messages + sentChoice("from-older-history", gaming),
+                    inputMode = ChatInputMode.Hidden
+                )
+            }
+            awaitHiddenPanel()
+            awaitMessage(gamingEs, "from-older-history")
+            awaitInReadingArea("from-older-history")
+            assertNull(rowInReadingArea(anchor))
+        }
+    }
+
+    @Test
+    fun compactChoicesScrollIndependentlyAndResetForAnEqualHeightPrompt() {
+        val shortOptions = List(3) { index -> talking.copy(id = "short-$index") }
+        val options = listOf(gaming) + shortOptions + longChoice
+        val history = narrativeHistory()
+        val state = mutableStateOf(ChatUiState(history, inputMode = ChatInputMode.Choices("compact", options)))
+        val catalog = mutableStateOf<List<Sticker>?>(null)
+        val height = mutableStateOf(260.dp)
+        val events = mutableListOf<Pair<String, String>>()
+        fun showChat(activity: ComponentActivity) {
+            activity.setContent {
+                Box(Modifier.size(320.dp, height.value)) {
+                    ChatContent(
+                        state.value, "es", catalog.value,
+                        onChoicePressed = { prompt, choice -> events.add(prompt to choice) }
+                    )
+                }
+            }
+        }
+        ActivityScenario.launch(ComponentActivity::class.java).use { scenario ->
+            scenario.onActivity(::showChat)
+            awaitChoice(gaming, gamingEs)
+            val compact = awaitScrollbarAtPanel(CHAT_CHOICE_PANEL_TAG)
+            awaitHistoryEnd(history.last().id)
+            val bar = scrollbarBounds()
+            val readingArea = Rect(boundsOf(awaitTag(CHAT_HISTORY_TAG)).left, bar.top, bar.left, bar.bottom)
+            val historyPixels = capturePixels(scenario, readingArea)
+            assertNull(findVisibleNode { it.text?.toString() == "No se pudieron cargar los stickers." })
+            val lastTag = "$CHAT_CHOICE_TAG_PREFIX${longChoice.id}"
+            assertNull(findVisibleNode { it.viewIdResourceName == lastTag })
+            val inset = compact.height() / 12
+            val beforeSwipe = capturePixels(scenario, compact)
+            swipe(compact.centerX(), compact.bottom - inset, compact.top + inset)
+            assertFalse("A real gesture must scroll the choices", beforeSwipe.contentEquals(capturePixels(scenario, compact)))
+            repeat(18) {
+                if (findChoice(longChoice, longChoiceEs) == null) {
+                    swipe(compact.centerX(), compact.bottom - inset, compact.top + inset)
+                }
+            }
+            assertTrue(
+                "Expected the long choice within the scrolled panel. Visible options: " +
+                    options.mapNotNull { option ->
+                        findVisibleNode { it.viewIdResourceName == "$CHAT_CHOICE_TAG_PREFIX${option.id}" }
+                            ?.let { "${option.id} ${boundsOf(it)}" }
+                    },
+                findChoice(longChoice, longChoiceEs) != null
+            )
+            awaitChoice(longChoice, longChoiceEs)
+            assertTrue(
+                "Scrolling the choice list must not move the history above it",
+                historyPixels.contentEquals(capturePixels(scenario, readingArea))
+            )
+            scenario.onActivity {
+                assertTrue(events.isEmpty())
+                catalog.value = emptyList()
+                state.value = state.value.copy(inputMode = ChatInputMode.Choices("next-compact", options))
+            }
+            awaitChoice(gaming, gamingEs)
+            assertEquals(compact, awaitScrollbarAtPanel(CHAT_CHOICE_PANEL_TAG))
+            assertNull(findVisibleNode { it.viewIdResourceName == lastTag })
+            assertNull(findVisibleNode { it.text?.toString() == "No hay stickers disponibles." })
+
+            scenario.onActivity { height.value = 650.dp }
+            awaitValue("larger choice panel after resizing") {
+                awaitScrollbarAtPanel(CHAT_CHOICE_PANEL_TAG).takeIf { it.height() > compact.height() }
+            }
+            awaitHistoryEnd(history.last().id)
+            scenario.recreate()
+            scenario.onActivity(::showChat)
+            awaitChoice(gaming, gamingEs)
+            awaitScrollbarAtPanel(CHAT_CHOICE_PANEL_TAG)
+            awaitHistoryEnd(history.last().id)
+            scenario.onActivity { assertTrue(events.isEmpty()) }
+        }
+    }
+
+    @Test
     fun readReceiptBelongsToOneMessageAndSentImageMatchesTheLocalizedAsset() {
         val language = mutableStateOf("es")
         val stickersById = StickerRepository.load(context).associateBy { it.id }
@@ -527,9 +755,16 @@ class ChatLocalizationTest {
         val unavailable = listOf(
             unread.copy(id = "wrong_pack", content = sticker.copy(packId = "ame")),
             unread.copy(id = "unknown_sticker", content = sticker.copy(stickerId = "unknown")),
-            unread.copy(id = "ame_sticker", sender = MessageSender.AME),
-            unread.copy(id = "pchan_text", content = MessageContent.Text("dialogue.preview.greeting"))
+            unread.copy(id = "ame_sticker", sender = MessageSender.AME)
         )
+        val short = Message(
+            "pchan_short",
+            MessageSender.PCHAN,
+            MessageContent.Text("dialogue.preview.narrative.reply"),
+            sentAt = 1L,
+            readAt = 2L
+        )
+        val long = sentChoice("pchan_long", longChoice)
         ActivityScenario.launch(ComponentActivity::class.java).use { scenario ->
             scenario.onActivity { activity ->
                 activity.setContent {
@@ -541,6 +776,8 @@ class ChatLocalizationTest {
                             for (message in unavailable) {
                                 ChatMessageItem(message, localization, stickersById)
                             }
+                            ChatMessageItem(short, localization, stickersById)
+                            ChatMessageItem(long, localization, stickersById)
                             PixelImage(
                                 path = "${JineAssets.Stickers.PCHAN_DIRECTORY}/${localization.language}/love.png",
                                 modifier = Modifier.size(72.dp),
@@ -553,8 +790,32 @@ class ChatLocalizationTest {
 
             unavailable.forEach { awaitMessage("Mensaje no disponible", it.id) }
             val spanish = checkReadSticker(scenario, "Que viva el amor", "Leído", read.id, unread.id)
+            val shortText = boundsOf(awaitMessage("¡Buena idea!", short.id))
+            val longText = boundsOf(awaitMessage(longChoiceEs, long.id))
+            val shortRow = boundsOf(awaitTag("$CHAT_MESSAGE_TAG_PREFIX${short.id}"))
+            val receipt = boundsOf(awaitMessage("Leído", short.id))
+            assertTrue(shortText.left > shortRow.centerX())
+            assertTrue(longText.height() > shortText.height())
+            assertTrue(receipt.top >= shortText.bottom)
+            assertTrue(receipt.left <= shortText.left)
+            assertNull(findNodeInTag("$CHAT_MESSAGE_TAG_PREFIX${long.id}") { it.text?.toString() == "Leído" })
+            for (message in listOf(short, long)) {
+                assertNull(findNodeInTag("$CHAT_MESSAGE_TAG_PREFIX${message.id}") { it.contentDescription != null })
+            }
+            val rowPixels = capturePixels(scenario, shortRow)
+            val green = JineSentBubble.toArgb()
+            val bubbleLeft = rowPixels.indices.filter { rowPixels[it] == green }.minOf { it % shortRow.width() }
+            assertTrue(kotlin.math.abs(shortRow.left + bubbleLeft - receipt.left) <= 1)
+            // Green beyond the bubble body in the reserved right-hand strip is the reflected tail.
+            val tailWidth = (context.resources.displayMetrics.density * 5).toInt()
+            assertTrue(rowPixels.indices.any { rowPixels[it] == green && it % shortRow.width() >= shortRow.width() - tailWidth })
+            assertFalse(rowPixels.indices.any { rowPixels[it] == green && it % shortRow.width() < shortRow.width() / 3 })
             scenario.onActivity { language.value = "en" }
             unavailable.forEach { awaitMessage("Message unavailable", it.id) }
+            awaitMessage("Good idea!", short.id)
+            awaitMessage("Read", short.id)
+            awaitMessage("We could try a cozy game, chat with the audience and put together a list of ideas for the next stream.", long.id)
+            assertNull(findNodeInTag("$CHAT_MESSAGE_TAG_PREFIX${long.id}") { it.text?.toString() == "Read" })
             val english = checkReadSticker(scenario, "Love forever", "Read", read.id, unread.id)
             assertFalse(spanish.contentEquals(english))
         }
@@ -700,6 +961,45 @@ class ChatLocalizationTest {
         return awaitNode(label, withinTag = "$CHAT_MESSAGE_TAG_PREFIX$messageId")
     }
 
+    private fun awaitChoice(choice: DialogueChoice, label: String): AccessibilityNodeInfo =
+        awaitValue("choice '${choice.id}' with label '$label'") { findChoice(choice, label) }
+
+    private fun findChoice(choice: DialogueChoice, label: String): AccessibilityNodeInfo? =
+        findVisibleNode { it.viewIdResourceName == "$CHAT_CHOICE_TAG_PREFIX${choice.id}" }?.takeIf { node ->
+            node.findNode { it.text?.toString() == label } != null
+        }
+
+    private fun narrativeHistory(): List<Message> {
+        val base = initialMessages(0L)
+        return List(36) { index -> base[index % base.size].copy(id = "narrative-$index") } +
+            Message(
+                "narrative-question",
+                MessageSender.AME,
+                MessageContent.Text("dialogue.preview.narrative.question"),
+                sentAt = 1L
+            )
+    }
+
+    private fun sentChoice(id: String, choice: DialogueChoice): Message =
+        Message(id, MessageSender.PCHAN, MessageContent.Text(choice.textKey), sentAt = 2L)
+
+    private fun awaitScrollbarAtPanel(tag: String): Rect = awaitValue("scrollbar ending at $tag") {
+        val panel = findVisibleNode { it.viewIdResourceName == tag }?.let(::boundsOf) ?: return@awaitValue null
+        val bar = findVisibleNode { it.viewIdResourceName == CHAT_SCROLLBAR_TAG }?.let(::boundsOf)
+        panel.takeIf { it.top == bar?.bottom }
+    }
+
+    private fun awaitHiddenPanel() {
+        awaitValue("full reading area without a panel") {
+            val panel = findVisibleNode {
+                it.viewIdResourceName == CHAT_PANEL_TAG || it.viewIdResourceName == CHAT_CHOICE_PANEL_TAG
+            }
+            val history = findVisibleNode { it.viewIdResourceName == CHAT_HISTORY_TAG }?.let(::boundsOf)
+            val bar = findVisibleNode { it.viewIdResourceName == CHAT_SCROLLBAR_TAG }?.let(::boundsOf)
+            Unit.takeIf { panel == null && history != null && bar?.bottom == history.bottom }
+        }
+    }
+
     private fun ChatViewModel.messageIds() = uiState.value.messages.map { it.id }
 
     private fun awaitTag(tag: String): AccessibilityNodeInfo = awaitValue(tag) {
@@ -712,6 +1012,13 @@ class ChatLocalizationTest {
 
     private fun awaitInReadingArea(id: String, wholeRow: Boolean = true): Rect =
         awaitValue("row $id above the panel") { rowInReadingArea(id, wholeRow) }
+
+    private fun awaitHistoryEnd(id: String): Rect = awaitValue("row $id at the end of the history") {
+        val marginPx = 12 * context.resources.displayMetrics.density
+        rowInReadingArea(id, wholeRow = false)?.takeIf {
+            kotlin.math.abs(scrollbarBounds().bottom - it.bottom - marginPx) <= 2f
+        }
+    }
 
     private fun rowInReadingArea(id: String, wholeRow: Boolean = true): Rect? {
         val node = findVisibleNode { it.viewIdResourceName == "$CHAT_MESSAGE_TAG_PREFIX$id" } ?: return null

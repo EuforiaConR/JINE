@@ -10,9 +10,9 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
@@ -44,6 +44,7 @@ import com.euforia.jine.data.repository.StickerRepository
 import com.euforia.jine.ui.components.ChatHeader
 import com.euforia.jine.ui.components.ChatHistory
 import com.euforia.jine.ui.components.ChatScrollbar
+import com.euforia.jine.ui.components.DialogueChoicePanel
 import com.euforia.jine.ui.components.JINE_UI_SCALE
 import com.euforia.jine.ui.components.JineWindow
 import com.euforia.jine.ui.components.PixelTiledImage
@@ -74,9 +75,14 @@ internal fun ChatScreen(
     val stickers = rememberStickerCatalog()
     val validStickerIds = remember(stickers) { stickers.orEmpty().map { it.id }.toSet() }
 
-    ChatContent(uiState, language, stickers) { sticker ->
-        if (viewModel.sendSticker(sticker.id, validStickerIds)) onStickerSent(sticker)
-    }
+    ChatContent(
+        uiState,
+        language,
+        stickers,
+        onStickerPressed = { sticker ->
+            if (viewModel.sendSticker(sticker.id, validStickerIds)) onStickerSent(sticker)
+        }
+    )
 }
 
 @Composable
@@ -97,7 +103,8 @@ internal fun ChatContent(
     uiState: ChatUiState,
     language: String,
     stickers: List<Sticker>?,
-    onStickerPressed: (Sticker) -> Unit = {}
+    onStickerPressed: (Sticker) -> Unit = {},
+    onChoicePressed: (promptId: String, choiceId: String) -> Unit = { _, _ -> }
 ) {
     val localization = rememberLocalization(language)
     val stickersById = remember(stickers) { stickers.orEmpty().associateBy { it.id } }
@@ -113,7 +120,13 @@ internal fun ChatContent(
             )
 
             BoxWithConstraints(Modifier.fillMaxSize()) {
-                var panelHeightPx by remember { mutableStateOf<Int?>(null) }
+                val mode = uiState.inputMode
+                val panelIdentity = when (mode) {
+                    ChatInputMode.Stickers, ChatInputMode.Hidden -> mode
+                    is ChatInputMode.Choices -> mode.promptId
+                }
+                val activePanelHeight = remember(panelIdentity) { mutableStateOf<Int?>(null) }
+                val panelHeightPx = if (mode == ChatInputMode.Hidden) 0 else activePanelHeight.value
                 ChatHistory(
                     messages = uiState.messages,
                     localization = localization,
@@ -132,31 +145,47 @@ internal fun ChatContent(
                         modifier = Modifier.align(Alignment.TopEnd).height(readingHeight)
                     )
                 }
-                Box(
-                    Modifier
-                        .align(Alignment.BottomCenter)
-                        .fillMaxWidth()
-                        .heightIn(max = maxHeight * 0.45f)
-                        .onSizeChanged { size -> panelHeightPx = size.height }
-                        .semantics {
-                            testTagsAsResourceId = true
-                            testTag = CHAT_PANEL_TAG
+                if (mode != ChatInputMode.Hidden) {
+                    // A new panel reports its own size even when it matches the previous panel.
+                    // Measurement callbacks keep the state of the panel that created them.
+                    key(panelIdentity) {
+                        Box(
+                            Modifier
+                                .align(Alignment.BottomCenter)
+                                .fillMaxWidth()
+                                .heightIn(max = maxHeight * 0.45f)
+                                .onSizeChanged { size -> activePanelHeight.value = size.height }
+                                .semantics {
+                                    if (mode == ChatInputMode.Stickers) {
+                                        testTagsAsResourceId = true
+                                        testTag = CHAT_PANEL_TAG
+                                    }
+                                }
+                                .pointerInput(Unit) {
+                                    // Hit-test gaps without consuming the panel's own gestures.
+                                    awaitPointerEventScope { while (true) awaitPointerEvent() }
+                                }
+                        ) {
+                            when (mode) {
+                                ChatInputMode.Hidden -> Unit
+                                ChatInputMode.Stickers -> {
+                                    if (stickers == null) {
+                                        StickerPanelStatus(R.string.sticker_catalog_error)
+                                    } else {
+                                        StickerPicker(
+                                            stickers = stickers,
+                                            onStickerPressed = onStickerPressed,
+                                            descriptionFor = { sticker ->
+                                                localization.translate(sticker.descriptionKey)
+                                            },
+                                            enabled = uiState.canSendSticker,
+                                            language = localization.language
+                                        )
+                                    }
+                                }
+                                is ChatInputMode.Choices -> DialogueChoicePanel(mode, localization, onChoicePressed)
+                            }
                         }
-                        .pointerInput(Unit) {
-                            // Hit-test the whole panel, including the gaps, without consuming its grid's gestures.
-                            awaitPointerEventScope { while (true) awaitPointerEvent() }
-                        }
-                ) {
-                    if (stickers == null) {
-                        StickerPanelStatus(R.string.sticker_catalog_error)
-                    } else {
-                        StickerPicker(
-                            stickers = stickers,
-                            onStickerPressed = onStickerPressed,
-                            descriptionFor = { sticker -> localization.translate(sticker.descriptionKey) },
-                            enabled = uiState.canSendSticker,
-                            language = localization.language
-                        )
                     }
                 }
             }
@@ -184,6 +213,62 @@ private fun ChatHistoryPreview() {
         }
     }
     ChatContent(ChatUiState(history), JineLanguageManager.DEFAULT_LANGUAGE, rememberStickerCatalog())
+}
+
+@Preview(name = "Hilo sin panel · textos de P-chan", showBackground = true, widthDp = 360, heightDp = 780)
+@Composable
+private fun HiddenPanelPreview() {
+    val messages = initialMessages(0L) + listOf(
+        Message("preview_narrative_short", MessageSender.PCHAN, MessageContent.Text(narrativeChoices[0].textKey), 1L, 2L),
+        Message("preview_narrative_reply", MessageSender.AME, MessageContent.Text("dialogue.preview.narrative.reply"), 3L),
+        Message("preview_narrative_sticker", MessageSender.PCHAN, MessageContent.Sticker(PCHAN_PACK_ID, "love"), 4L),
+        Message("preview_narrative_long", MessageSender.PCHAN, MessageContent.Text(narrativeLongChoice.textKey), 5L)
+    )
+    ChatContent(
+        ChatUiState(messages, inputMode = ChatInputMode.Hidden),
+        JineLanguageManager.DEFAULT_LANGUAGE,
+        rememberStickerCatalog()
+    )
+}
+
+@Preview(name = "Opciones · Español", group = "Narrativa", showBackground = true, widthDp = 360, heightDp = 780)
+@Composable
+private fun SpanishChoicesPreview() {
+    ChoicesPreview(JineLanguageManager.DEFAULT_LANGUAGE, narrativeChoices)
+}
+
+@Preview(name = "Choices · English", group = "Narrativa", showBackground = true, widthDp = 360, heightDp = 780)
+@Composable
+private fun EnglishChoicesPreview() {
+    ChoicesPreview(JineLanguageManager.ENGLISH, narrativeChoices)
+}
+
+@Preview(name = "Opciones largas · ventana compacta", group = "Narrativa", showBackground = true, widthDp = 320, heightDp = 260)
+@Composable
+private fun CompactChoicesPreview() {
+    ChoicesPreview(
+        JineLanguageManager.DEFAULT_LANGUAGE,
+        listOf(narrativeLongChoice) + narrativeChoices + narrativeLongChoice.copy(id = "another-long")
+    )
+}
+
+private val narrativeChoices = listOf(
+    DialogueChoice("gaming", "dialogue.preview.narrative.choice.gaming"),
+    DialogueChoice("talking", "dialogue.preview.narrative.choice.talking")
+)
+private val narrativeLongChoice = DialogueChoice("long", "dialogue.preview.narrative.choice.long")
+
+@Composable
+private fun ChoicesPreview(language: String, choices: List<DialogueChoice>) {
+    val messages = initialMessages(0L) + listOf(
+        Message("preview_narrative_intro", MessageSender.AME, MessageContent.Text("dialogue.preview.narrative.intro"), 1L),
+        Message("preview_narrative_question", MessageSender.AME, MessageContent.Text("dialogue.preview.narrative.question"), 2L)
+    )
+    ChatContent(
+        ChatUiState(messages, inputMode = ChatInputMode.Choices("preview-stream", choices)),
+        language,
+        rememberStickerCatalog()
+    )
 }
 
 @Preview(

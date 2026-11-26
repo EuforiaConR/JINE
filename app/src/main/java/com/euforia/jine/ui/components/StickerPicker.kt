@@ -34,6 +34,7 @@ import com.euforia.jine.R
 import com.euforia.jine.core.localization.JineLanguageManager
 import com.euforia.jine.core.localization.localizedStringResource
 import com.euforia.jine.data.model.Sticker
+import com.euforia.jine.ui.theme.JINE_PANEL_OVERLAY_ALPHA
 import com.euforia.jine.ui.theme.JineStickerOverlay
 import com.euforia.jine.ui.theme.JineText
 import com.euforia.jine.ui.theme.ZpixFont
@@ -42,7 +43,6 @@ import com.euforia.jine.ui.theme.pixelFontSize
 internal const val PICKER_STICKER_TAG_PREFIX = "sticker-picker-"
 private const val COLUMN_COUNT = 4
 private const val MAX_VISIBLE_ROWS = 2
-private const val PANEL_ALPHA = 0.45f
 private const val STICKER_IDLE_ALPHA = 0.4f
 private const val STICKER_PRESSED_ALPHA = 1f
 private val cellHeight = 79.dp
@@ -73,7 +73,7 @@ fun StickerPicker(
         modifier = modifier
             .fillMaxWidth()
             .height(gridHeight)
-            .background(JineStickerOverlay.copy(alpha = PANEL_ALPHA)),
+            .background(JineStickerOverlay.copy(alpha = JINE_PANEL_OVERLAY_ALPHA)),
         contentPadding = PaddingValues(panelPadding),
         horizontalArrangement = Arrangement.spacedBy(cellSpacing),
         verticalArrangement = Arrangement.spacedBy(cellSpacing)
@@ -122,7 +122,7 @@ internal fun StickerPanelStatus(@StringRes messageId: Int, modifier: Modifier = 
         text = localizedStringResource(messageId),
         modifier = modifier
             .fillMaxWidth()
-            .background(JineStickerOverlay.copy(alpha = PANEL_ALPHA))
+            .background(JineStickerOverlay.copy(alpha = JINE_PANEL_OVERLAY_ALPHA))
             .padding(panelPadding),
         color = JineText,
         fontFamily = ZpixFont,

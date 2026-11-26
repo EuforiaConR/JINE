@@ -84,6 +84,18 @@ class LocalizationAndStickerDataTest {
     }
 
     @Test
+    fun narrativePreviewKeysHaveNonBlankTranslationsInBothAssetCatalogs() {
+        val prefix = "dialogue.preview.narrative."
+        val keys = setOf("intro", "question", "choice.gaming", "choice.talking", "choice.long", "reply")
+            .map { prefix + it }.toSet()
+        for (path in listOf(JineAssets.Languages.SPANISH, JineAssets.Languages.ENGLISH)) {
+            val catalog = JSONObject(JineAssetManager.getText(context, path))
+            assertEquals(keys, catalog.keys().asSequence().filter { it.startsWith(prefix) }.toSet())
+            assertTrue(keys.all { catalog.getString(it).isNotBlank() })
+        }
+    }
+
+    @Test
     fun missingEnglishKeyFallsBackAndDictionaryLoadsOnlyOnce() {
         val manager = JineLanguageManager()
         val reads = mutableListOf<String>()

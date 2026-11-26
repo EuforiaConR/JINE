@@ -63,7 +63,10 @@ internal fun ChatMessageItem(
         when (val content = message.content) {
             is MessageContent.Text -> when (message.sender) {
                 MessageSender.AME -> ReceivedMessage(message = localization.translate(content.textKey))
-                MessageSender.PCHAN -> UnavailableMessage()
+                MessageSender.PCHAN -> SentMessage(
+                    message = localization.translate(content.textKey),
+                    isRead = message.isRead
+                )
             }
             is MessageContent.Sticker -> when (message.sender) {
                 MessageSender.AME -> UnavailableMessage()
@@ -92,17 +95,20 @@ private fun SentSticker(path: String, description: String, isRead: Boolean) {
             modifier = Modifier.size(sentStickerSize),
             contentDescription = description
         )
-        if (isRead) {
-            Text(
-                text = localizedStringResource(R.string.chat_message_read),
-                modifier = Modifier.padding(top = 2.dp),
-                color = JineReadReceipt,
-                fontFamily = DinkieBitmapFont,
-                fontSize = pixelFontSize(10.sp, baseSize = 7),
-                letterSpacing = 0.sp
-            )
-        }
+        if (isRead) MessageReadReceipt()
     }
+}
+
+@Composable
+internal fun MessageReadReceipt() {
+    Text(
+        text = localizedStringResource(R.string.chat_message_read),
+        modifier = Modifier.padding(top = 2.dp),
+        color = JineReadReceipt,
+        fontFamily = DinkieBitmapFont,
+        fontSize = pixelFontSize(10.sp, baseSize = 7),
+        letterSpacing = 0.sp
+    )
 }
 
 @Composable

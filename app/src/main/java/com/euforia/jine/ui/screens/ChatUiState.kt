@@ -12,11 +12,11 @@ internal enum class CommunicationState {
 
 internal data class ChatUiState(
     val messages: List<Message>,
-    val communicationState: CommunicationState = CommunicationState.AVAILABLE
+    val communicationState: CommunicationState = CommunicationState.AVAILABLE,
+    val inputMode: ChatInputMode = ChatInputMode.Stickers
 ) {
-    // Free chat accepts input in every processing state.
     val canSendSticker: Boolean
-        get() = true
+        get() = inputMode == ChatInputMode.Stickers
 }
 
 internal fun initialMessages(sentAt: Long): List<Message> {
