@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -56,30 +55,27 @@ internal const val CHAT_PANEL_TAG = "chat-sticker-panel"
 @Composable
 fun ChatScreen(
     language: String = JineLanguageManager.DEFAULT_LANGUAGE,
-    onStickerSelected: (Sticker) -> Unit = {}
+    onStickerSent: (Sticker) -> Unit = {}
 ) {
     val owner = checkNotNull(LocalView.current.findViewTreeViewModelStoreOwner()) {
         "ChatScreen requires a ViewModelStoreOwner"
     }
     val provider = remember(owner) { ViewModelProvider(owner) }
-    ChatScreen(provider[ChatViewModel::class.java], language, onStickerSelected)
+    ChatScreen(provider[ChatViewModel::class.java], language, onStickerSent)
 }
 
 @Composable
 internal fun ChatScreen(
     viewModel: ChatViewModel,
     language: String = JineLanguageManager.DEFAULT_LANGUAGE,
-    onStickerSelected: (Sticker) -> Unit = {}
+    onStickerSent: (Sticker) -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val stickers = rememberStickerCatalog()
     val validStickerIds = remember(stickers) { stickers.orEmpty().map { it.id }.toSet() }
-    LaunchedEffect(viewModel, validStickerIds) {
-        viewModel.reconcileSelection(validStickerIds)
-    }
 
     ChatContent(uiState, language, stickers) { sticker ->
-        if (viewModel.onStickerPressed(sticker.id, validStickerIds)) onStickerSelected(sticker)
+        if (viewModel.sendSticker(sticker.id, validStickerIds)) onStickerSent(sticker)
     }
 }
 
@@ -156,8 +152,7 @@ internal fun ChatContent(
                     } else {
                         StickerPicker(
                             stickers = stickers,
-                            selectedStickerId = uiState.selectedStickerId?.takeIf { it in stickersById },
-                            onStickerSelected = onStickerPressed,
+                            onStickerPressed = onStickerPressed,
                             descriptionFor = { sticker -> localization.translate(sticker.descriptionKey) },
                             enabled = uiState.canSendSticker,
                             language = localization.language
@@ -230,7 +225,6 @@ private fun ChatRespondingPreview() {
                 Message("preview_batch_reply", MessageSender.AME, MessageContent.Text("dialogue.demo.reply.love.01"), 3L),
                 unread.copy(sentAt = 4L)
             ),
-            selectedStickerId = "gomen",
             communicationState = CommunicationState.RESPONDING
         ),
         language = JineLanguageManager.DEFAULT_LANGUAGE,

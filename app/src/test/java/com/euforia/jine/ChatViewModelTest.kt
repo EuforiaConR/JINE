@@ -59,7 +59,7 @@ class ChatViewModelTest {
     }
 
     @Test
-    fun initialMessagesAndUnconfirmedSelectionDoNotScheduleCommunication() = runTest(dispatcher) {
+    fun initialMessagesAndInvalidSendsDoNotScheduleCommunication() = runTest(dispatcher) {
         val chat = createChat()
         val initial = chat.state.messages
         assertEquals(listOf("preview_greeting", "preview_question", "preview_long_message"), initial.map { it.id })
@@ -69,33 +69,51 @@ class ChatViewModelTest {
         )
         assertTrue(initial.all { it.sender == MessageSender.AME && it.sentAt == epoch && !it.isRead })
         assertEquals(CommunicationState.AVAILABLE, chat.state.communicationState)
-        assertNull(chat.state.selectedStickerId)
 
-        assertFalse(chat.onStickerPressed("unknown", validIds))
-        assertTrue(chat.onStickerPressed("ok", validIds))
-        assertEquals("ok", chat.state.selectedStickerId)
-        assertTrue(chat.onStickerPressed("love", validIds))
-        assertEquals("love", chat.state.selectedStickerId)
-        chat.reconcileSelection(setOf("ok"))
-        assertNull(chat.state.selectedStickerId)
+        assertFalse(chat.sendSticker("unknown", validIds))
+        assertFalse(chat.sendSticker("ok", emptySet()))
 
         advanceUntilIdle()
         assertEquals(0L, testScheduler.currentTime)
         assertEquals(initial, chat.state.messages)
         assertEquals(CommunicationState.AVAILABLE, chat.state.communicationState)
+        assertTrue(batches.isEmpty())
+    }
+
+    @Test
+    fun oneSendPerTapKeepsRepeatedAndDifferentStickersAtTheSameInstant() = runTest(dispatcher) {
+        val chat = createChat()
+        val initial = chat.state.messages
+        assertTrue(chat.sendSticker("love", validIds))
+        assertEquals(initial, chat.state.messages.dropLast(1))
+        assertEquals(1, chat.outgoing.size)
+        assertTrue(chat.sendSticker("love", validIds))
+        assertTrue(chat.sendSticker("ok", validIds))
+        assertEquals(initial, chat.state.messages.take(3))
+        assertEquals(listOf("test-1", "test-2", "test-3"), chat.outgoing.map { it.id })
+        assertEquals(listOf("love", "love", "ok"), chat.outgoing.map {
+            (it.content as MessageContent.Sticker).stickerId
+        })
+        assertTrue(chat.outgoing.all { it.sentAt == epoch && !it.isRead })
+        runCurrent()
+        tick(650)
+        assertTrue(chat.outgoing.all { it.readAt == epoch + 650 })
+        tick(950)
+        assertEquals(chat.outgoing, batches.single().messages)
+        assertEquals(listOf("dialogue.demo.batch.mixed.01"), chat.replyKeys)
     }
 
     @Test
     fun staggeredReadsProduceOneRepeatedReactionAfterTheLastRead() = runTest(dispatcher) {
         val chat = createChat()
-        confirm(chat, "love")
+        send(chat, "love")
         val first = chat.outgoing.single()
         assertEquals(CommunicationState.READING, chat.state.communicationState)
         assertTrue(chat.state.canSendSticker)
         assertNull(first.readAt)
 
         tick(400)
-        confirm(chat, "love")
+        send(chat, "love")
         val second = chat.outgoing.last()
         assertNotEquals(first.id, second.id)
         assertEquals(epoch + 400, second.sentAt)
@@ -103,7 +121,7 @@ class ChatViewModelTest {
         assertEquals(listOf(epoch + 650, null), chat.outgoing.map { it.readAt })
 
         tick(250)
-        confirm(chat, "love")
+        send(chat, "love")
         val third = chat.outgoing.last()
         tick(150)
         assertEquals(listOf(epoch + 650, epoch + 1_050, null), chat.outgoing.map { it.readAt })
@@ -123,14 +141,14 @@ class ChatViewModelTest {
     }
 
     @Test
-    fun confirmationDuringPreparationRestartsTheFullIntervalAfterItsRead() = runTest(dispatcher) {
+    fun sendDuringPreparationRestartsTheFullIntervalAfterItsRead() = runTest(dispatcher) {
         val chat = createChat()
-        confirm(chat, "love")
+        send(chat, "love")
         tick(650)
         assertTrue(chat.outgoing.single().isRead)
         assertEquals(CommunicationState.READING, chat.state.communicationState)
         tick(550)
-        confirm(chat, "ok")
+        send(chat, "ok")
         tick(400)
         assertTrue(batches.isEmpty())
         assertTrue(chat.replyKeys.isEmpty())
@@ -148,19 +166,20 @@ class ChatViewModelTest {
     }
 
     @Test
-    fun selectionAndInvalidPressesDoNotRestartPreparationOrClearSelectionAcrossAReaction() = runTest(dispatcher) {
+    fun invalidSendsDoNotRestartPreparation() = runTest(dispatcher) {
         val chat = createChat()
         assertTrue(chat.state.canSendSticker)
-        confirm(chat, "love")
+        send(chat, "love")
         tick(1_200)
-        assertTrue(chat.onStickerPressed("ok", validIds))
-        assertFalse(chat.onStickerPressed("unknown", validIds))
+        val waiting = chat.state
+        assertFalse(chat.sendSticker("unknown", validIds))
+        assertFalse(chat.sendSticker("ok", emptySet()))
+        assertEquals(waiting, chat.state)
         assertTrue(batches.isEmpty())
 
         tick(400)
         assertEquals(CommunicationState.RESPONDING, chat.state.communicationState)
         assertTrue(chat.state.canSendSticker)
-        assertEquals("ok", chat.state.selectedStickerId)
         assertEquals(listOf("dialogue.demo.reply.love.01"), chat.replyKeys)
         assertEquals(StickerBatchType.SINGLE, batches.single().type)
         tick(699)
@@ -169,16 +188,15 @@ class ChatViewModelTest {
         assertEquals(listOf("dialogue.demo.reply.love.01", "dialogue.demo.reply.love.02"), chat.replyKeys)
         assertEquals(listOf(epoch + 1_600, epoch + 2_300), chat.replies.map { it.sentAt })
         assertEquals(CommunicationState.AVAILABLE, chat.state.communicationState)
-        assertEquals("ok", chat.state.selectedStickerId)
     }
 
     @Test
     fun newSendDuringAReactionIsReadIndependentlyAndWaitsForTheNextPreparation() = runTest(dispatcher) {
         val chat = createChat()
-        confirm(chat, "love")
+        send(chat, "love")
         tick(1_600)
         tick(200)
-        confirm(chat, "ok")
+        send(chat, "ok")
         assertEquals(CommunicationState.RESPONDING, chat.state.communicationState)
         assertNull(chat.outgoing.last().readAt)
         tick(500)
@@ -201,7 +219,7 @@ class ChatViewModelTest {
         assertTrue(chat.replies.all { !it.isRead })
         assertEquals(CommunicationState.AVAILABLE, chat.state.communicationState)
 
-        confirm(chat, "pien")
+        send(chat, "pien")
         assertEquals(CommunicationState.READING, chat.state.communicationState)
         advanceUntilIdle()
         assertEquals("dialogue.demo.reply.pien.01", chat.replyKeys.last())
@@ -211,11 +229,11 @@ class ChatViewModelTest {
     @Test
     fun nextBatchAlreadyReadStillPreparesAfterTheActiveReactionAndCanGrow() = runTest(dispatcher) {
         val chat = createChat()
-        confirm(chat, "love")
+        send(chat, "love")
         tick(1_600)
-        confirm(chat, "ok")
+        send(chat, "ok")
         tick(25)
-        confirm(chat, "gomen")
+        send(chat, "gomen")
         tick(650)
         assertTrue(chat.outgoing.all { it.isRead })
         assertEquals(CommunicationState.RESPONDING, chat.state.communicationState)
@@ -224,7 +242,7 @@ class ChatViewModelTest {
         assertEquals(CommunicationState.READING, chat.state.communicationState)
 
         tick(350)
-        confirm(chat, "pien")
+        send(chat, "pien")
         tick(600)
         assertEquals(1, batches.size)
         tick(50)
@@ -241,9 +259,9 @@ class ChatViewModelTest {
     @Test
     fun aReadNextBatchCannotReuseTimeSpentWaitingForTheActiveReaction() = runTest(dispatcher) {
         val chat = createChat()
-        confirm(chat, "love")
+        send(chat, "love")
         tick(1_600)
-        confirm(chat, "ok")
+        send(chat, "ok")
         tick(650)
         assertTrue(chat.outgoing.last().isRead)
         assertEquals(CommunicationState.RESPONDING, chat.state.communicationState)
@@ -261,7 +279,7 @@ class ChatViewModelTest {
         val chat = createChat(timings = ChatTimings(spamThreshold = 3))
         val ids = List(20) { if (it % 2 == 0) "ok" else "love" }
         for (id in ids) {
-            confirm(chat, id)
+            send(chat, id)
             tick(500)
             assertTrue(chat.replyKeys.isEmpty())
         }
@@ -279,13 +297,13 @@ class ChatViewModelTest {
     }
 
     @Test
-    fun aConfirmationProcessedAtTheDeadlineBeforeEmissionStillJoinsTheOpenBatch() = runTest(dispatcher) {
+    fun aSendProcessedAtTheDeadlineBeforeEmissionStillJoinsTheOpenBatch() = runTest(dispatcher) {
         val chat = createChat()
-        confirm(chat, "love")
+        send(chat, "love")
         tick(650)
         advanceTimeBy(950)
         assertTrue(batches.isEmpty())
-        confirm(chat, "ok")
+        send(chat, "ok")
         assertTrue(batches.isEmpty())
         tick(1_600)
         assertEquals(listOf("love", "ok"), batches.single().stickerIds)
@@ -298,10 +316,10 @@ class ChatViewModelTest {
             timings = ChatTimings(readMs = 0, replyPreparationMs = 0, replyIntervalMs = 0),
             workerDispatcher = UnconfinedTestDispatcher(testScheduler)
         )
-        confirm(chat, "love")
+        send(chat, "love")
         assertEquals(CommunicationState.AVAILABLE, chat.state.communicationState)
         assertEquals(epoch, chat.outgoing.single().readAt)
-        confirm(chat, "ok")
+        send(chat, "ok")
         assertEquals(listOf(listOf("love"), listOf("ok")), batches.map { it.stickerIds })
         assertEquals(listOf("test-1", "test-2", "test-3", "test-4", "test-5"), chat.state.messages.drop(3).map { it.id })
         assertTrue(chat.outgoing.all { it.isRead })
@@ -320,7 +338,7 @@ class ChatViewModelTest {
             }
         })
         for (id in listOf("ok", "love", "new", "pien")) {
-            confirm(chat, id, validIds + "new")
+            send(chat, id, validIds + "new")
             advanceUntilIdle()
             assertEquals(CommunicationState.AVAILABLE, chat.state.communicationState)
         }
@@ -333,11 +351,11 @@ class ChatViewModelTest {
     fun backwardWallClockDoesNotMoveMessagesOrOverwriteReadAt() = runTest(dispatcher) {
         var wallTime = epoch
         val chat = createChat(now = { wallTime })
-        confirm(chat, "ok")
+        send(chat, "ok")
         val first = chat.outgoing.single()
         wallTime -= 5_000
         tick(300)
-        confirm(chat, "pien")
+        send(chat, "pien")
         val second = chat.outgoing.last()
         assertTrue(second.sentAt < first.sentAt)
         tick(350)
@@ -353,7 +371,7 @@ class ChatViewModelTest {
     @Test
     fun clearingDuringReadingCancelsAllPendingWork() = runTest(dispatcher) {
         val chat = createChat()
-        confirm(chat, "ok")
+        send(chat, "ok")
         tick(200)
         assertClearingStopsChat(chat)
         assertTrue(batches.isEmpty())
@@ -362,10 +380,9 @@ class ChatViewModelTest {
     @Test
     fun clearingDuringPreparationCancelsTheReaction() = runTest(dispatcher) {
         val chat = createChat()
-        confirm(chat, "ok")
+        send(chat, "ok")
         tick(1_200)
         assertTrue(chat.outgoing.single().isRead)
-        assertTrue(chat.onStickerPressed("love", validIds))
         assertClearingStopsChat(chat)
         assertTrue(batches.isEmpty())
     }
@@ -373,11 +390,11 @@ class ChatViewModelTest {
     @Test
     fun clearingBetweenReplyTextsCancelsTheRestAndTheNextBatchRead() = runTest(dispatcher) {
         val chat = createChat()
-        confirm(chat, "love")
+        send(chat, "love")
         tick(1_800)
         assertEquals(listOf("dialogue.demo.reply.love.01"), chat.replyKeys)
         assertEquals(CommunicationState.RESPONDING, chat.state.communicationState)
-        confirm(chat, "ok")
+        send(chat, "ok")
         assertClearingStopsChat(chat)
         assertEquals(1, batches.size)
         assertNull(chat.outgoing.last().readAt)
@@ -387,8 +404,7 @@ class ChatViewModelTest {
         val beforeClear = chat.state
         store.clear()
         advanceUntilIdle()
-        assertFalse(chat.onStickerPressed("ok", validIds))
-        chat.reconcileSelection(emptySet())
+        assertFalse(chat.sendSticker("ok", validIds))
         assertEquals(beforeClear, chat.state)
     }
 
@@ -410,11 +426,8 @@ class ChatViewModelTest {
         return ViewModelProvider(store, factory)[ChatViewModel::class.java]
     }
 
-    private fun confirm(chat: ChatViewModel, id: String, allowed: Set<String> = validIds) {
-        assertTrue(chat.onStickerPressed(id, allowed))
-        assertEquals(id, chat.state.selectedStickerId)
-        assertTrue(chat.onStickerPressed(id, allowed))
-        assertNull(chat.state.selectedStickerId)
+    private fun send(chat: ChatViewModel, id: String, allowed: Set<String> = validIds) {
+        assertTrue(chat.sendSticker(id, allowed))
         dispatcher.scheduler.runCurrent()
     }
 

@@ -89,11 +89,11 @@ class ChatLocalizationTest {
     }
 
     @Test
-    fun startsInSpanishOnEnglishDeviceAndChangesLanguageWithSelectionIntact() {
+    fun startsInSpanishOnEnglishDeviceAndChangesLanguageWithoutSending() {
         val englishConfig = Configuration(context.resources.configuration).apply { setLocale(Locale.ENGLISH) }
         val englishContext = context.createConfigurationContext(englishConfig)
         val requestedLanguage = mutableStateOf(JineLanguageManager.DEFAULT_LANGUAGE)
-        val selected = mutableListOf<Sticker>()
+        val sends = mutableListOf<Sticker>()
         val stickers = StickerRepository.load(context)
 
         ActivityScenario.launch(ComponentActivity::class.java).use { scenario ->
@@ -103,7 +103,7 @@ class ChatLocalizationTest {
                         LocalContext provides englishContext,
                         LocalConfiguration provides englishConfig
                     ) {
-                        ChatScreen(language = requestedLanguage.value, onStickerSelected = selected::add)
+                        ChatScreen(language = requestedLanguage.value, onStickerSent = sends::add)
                     }
                 }
             }
@@ -123,12 +123,6 @@ class ChatLocalizationTest {
             assertEquals(1, positions.drop(4).map { it.top }.distinct().size)
             assertTrue(positions[4].top > positions[0].top)
 
-            val firstSticker = awaitPickerSticker("ok", "De acuerdo", selected = false)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                assertEquals("Sin seleccionar", firstSticker.stickerControl().stateDescription.toString())
-            }
-            tap(firstSticker)
-            awaitPickerSticker("ok", "De acuerdo", selected = true)
             val spanishLove = boundsOf(awaitPickerSticker("love", "Que viva el amor"))
             val spanishLovePixels = capturePixels(scenario, spanishLove)
             scenario.onActivity { requestedLanguage.value = JineLanguageManager.ENGLISH }
@@ -140,10 +134,7 @@ class ChatLocalizationTest {
                 // Read the current semantics tree after the locale change, including off-focus cells.
                 instrumentation.uiAutomation.clearCache()
             }
-            val englishSticker = awaitPickerSticker("ok", "Okay", selected = true)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                assertEquals("Sticker selected", englishSticker.stickerControl().stateDescription.toString())
-            }
+            awaitPickerSticker("ok", "Okay")
             val englishLove = boundsOf(awaitPickerSticker("love", "Love forever"))
             assertEquals(spanishLove, englishLove)
             assertFalse(
@@ -151,27 +142,32 @@ class ChatLocalizationTest {
                 spanishLovePixels.contentEquals(capturePixels(scenario, englishLove))
             )
             assertEquals(previewIds, visibleMessageIds())
-            scenario.onActivity { assertEquals(listOf(stickers.first()), selected) }
+            scenario.onActivity { assertTrue(sends.isEmpty()) }
         }
     }
 
     @Test
     fun compactChatAndStickerGridScrollIndependently() {
         val lastMessage = "Tengo muchas cosas que contarte hoy. Espero que podamos hablar un rato."
+        val factory = controlledChatFactory(TestCoroutineScheduler())
+        val sends = mutableListOf<String>()
         ActivityScenario.launch(ComponentActivity::class.java).use { scenario ->
+            lateinit var chat: ChatViewModel
             scenario.onActivity { activity ->
+                chat = ViewModelProvider(activity, factory)[ChatViewModel::class.java]
                 activity.setContent {
                     Box(Modifier.size(width = 320.dp, height = 260.dp)) {
-                        ChatScreen()
+                        ChatScreen(chat, onStickerSent = { sends.add(it.id) })
                     }
                 }
             }
 
+            awaitInReadingArea("preview_long_message", wholeRow = false)
             scrollPickerToLastRow()
-            val lastSticker = awaitPickerSticker("sorena", "Esto.").stickerControl()
-            assertTrue(lastSticker.performAction(AccessibilityNodeInfo.ACTION_CLICK))
-            awaitPickerSticker("sorena", "Esto.", selected = true)
-
+            scenario.onActivity {
+                assertEquals(previewIds, chat.messageIds())
+                assertTrue(sends.isEmpty())
+            }
             awaitInReadingArea("preview_long_message", wholeRow = false)
             repeat(4) {
                 if (rowInReadingArea("preview_greeting") == null) {
@@ -182,37 +178,39 @@ class ChatLocalizationTest {
             swipeHistory(towardEnd = true)
             awaitNode(lastMessage)
             awaitInReadingArea("preview_long_message", wholeRow = false)
-            awaitPickerSticker("sorena", "Esto.", selected = true)
+            val lastSticker = awaitPickerSticker("sorena", "Esto.")
+            assertTrue(lastSticker.performAction(AccessibilityNodeInfo.ACTION_CLICK))
+            awaitMessage("Esto.", "timed-1")
+            awaitInReadingArea("timed-1", wholeRow = false)
+            scenario.onActivity {
+                assertEquals(previewIds + "timed-1", chat.messageIds())
+                assertEquals(listOf("sorena"), sends)
+            }
             assertEquals(panelBounds().top, scrollbarBounds().bottom)
         }
     }
 
     @Test
-    fun confirmsStickerSendsAndKeepsHistoryIdsAndOrderWhenLanguageChanges() {
+    fun eachPhysicalTapSendsOnceAndKeepsHistoryIdsAndOrderWhenLanguageChanges() {
         val language = mutableStateOf("es")
-        val presses = mutableListOf<String>()
+        val sends = mutableListOf<String>()
         val factory = controlledChatFactory(TestCoroutineScheduler())
         ActivityScenario.launch(ComponentActivity::class.java).use { scenario ->
             lateinit var chat: ChatViewModel
             scenario.onActivity { activity ->
                 chat = ViewModelProvider(activity, factory)[ChatViewModel::class.java]
                 activity.setContent {
-                    ChatScreen(chat, language = language.value, onStickerSelected = { presses.add(it.id) })
+                    ChatScreen(chat, language = language.value, onStickerSent = { sends.add(it.id) })
                 }
             }
 
-            tap(awaitPickerSticker("ok", "De acuerdo", selected = false))
-            awaitPickerSticker("ok", "De acuerdo", selected = true)
-            assertEquals(previewIds, chat.messageIds())
-
-            tap(awaitPickerSticker("love", "Que viva el amor", selected = false))
-            awaitPickerSticker("love", "Que viva el amor", selected = true)
-            awaitPickerSticker("ok", "De acuerdo", selected = false)
-            assertEquals(previewIds, chat.messageIds())
-
-            tap(awaitPickerSticker("ok", "De acuerdo", selected = false))
-            tap(awaitPickerSticker("ok", "De acuerdo", selected = true))
-            awaitPickerSticker("ok", "De acuerdo", selected = false)
+            val ok = awaitPickerSticker("ok", "De acuerdo")
+            assertTrue(ok.isEnabled)
+            assertTrue(ok.isClickable)
+            assertFalse(ok.isCheckable)
+            assertTrue(ok.findNode { it.className == "android.widget.Button" } != null)
+            tap(ok)
+            awaitMessage("De acuerdo", "timed-1")
             val firstSend = chat.messageIds()
             assertEquals(4, firstSend.size)
             assertEquals(previewIds, firstSend.take(3))
@@ -224,35 +222,30 @@ class ChatLocalizationTest {
             tap(historySticker)
             assertEquals(firstSend, chat.messageIds())
 
-            tap(awaitPickerSticker("ok", "De acuerdo", selected = false))
-            awaitPickerSticker("ok", "De acuerdo", selected = true)
-            assertEquals(firstSend, chat.messageIds())
-            tap(awaitPickerSticker("ok", "De acuerdo", selected = true))
-            awaitPickerSticker("ok", "De acuerdo", selected = false)
-            val secondSend = chat.messageIds()
-            assertEquals(5, secondSend.size)
-            assertEquals(firstSend, secondSend.take(4))
-            awaitMessage("De acuerdo", secondSend.last())
+            repeat(2) { tap(ok) }
+            awaitMessage("De acuerdo", "timed-3")
+            scenario.onActivity {
+                assertEquals(previewIds + (1..3).map { "timed-$it" }, chat.messageIds())
+                assertEquals(listOf("ok", "ok", "ok"), sends)
+            }
 
-            tap(awaitPickerSticker("love", "Que viva el amor", selected = false))
-            tap(awaitPickerSticker("love", "Que viva el amor", selected = true))
-            awaitPickerSticker("love", "Que viva el amor", selected = false)
+            tap(awaitPickerSticker("love", "Que viva el amor"))
+            awaitMessage("Que viva el amor", "timed-4")
             val sentIds = chat.messageIds()
-            assertEquals(6, sentIds.size)
-            assertEquals(secondSend, sentIds.take(5))
-            assertEquals(sentIds.size, sentIds.distinct().size)
-            awaitMessage("Que viva el amor", sentIds.last())
+            assertEquals(previewIds + (1..4).map { "timed-$it" }, sentIds)
+            assertEquals(listOf("ok", "ok", "ok", "love"), chat.uiState.value.messages.drop(3).map {
+                (it.content as MessageContent.Sticker).stickerId
+            })
             assertNull(findVisibleNode { it.text?.toString() == "Leído" })
 
             scenario.onActivity { language.value = "en" }
-            awaitMessage("Are you there?", "preview_question")
-            awaitMessage("Okay", sentIds[3])
-            awaitMessage("Okay", sentIds[4])
-            awaitMessage("Love forever", sentIds[5])
+            awaitNode("Minimize")
+            sentIds.drop(3).take(3).forEach { awaitMessage("Okay", it) }
+            awaitMessage("Love forever", sentIds.last())
             assertEquals(sentIds, chat.messageIds())
             assertNull(findVisibleNode { it.text?.toString() == "Read" })
             scenario.onActivity {
-                assertEquals(listOf("ok", "love", "ok", "ok", "ok", "ok", "love", "love"), presses)
+                assertEquals(listOf("ok", "ok", "ok", "love"), sends)
             }
         }
     }
@@ -262,11 +255,11 @@ class ChatLocalizationTest {
         val scheduler = TestCoroutineScheduler()
         val factory = controlledChatFactory(scheduler)
         val language = mutableStateOf("es")
-        val presses = mutableListOf<String>()
+        val sends = mutableListOf<String>()
         fun showChat(activity: ComponentActivity): ChatViewModel {
             val chat = ViewModelProvider(activity, factory)[ChatViewModel::class.java]
             activity.setContent {
-                ChatScreen(chat, language = language.value, onStickerSelected = { presses.add(it.id) })
+                ChatScreen(chat, language = language.value, onStickerSent = { sends.add(it.id) })
             }
             return chat
         }
@@ -274,42 +267,41 @@ class ChatLocalizationTest {
         ActivityScenario.launch(ComponentActivity::class.java).use { scenario ->
             lateinit var chat: ChatViewModel
             scenario.onActivity { chat = showChat(it) }
-            tap(awaitPickerSticker("love", "Que viva el amor", selected = false))
-            tap(awaitPickerSticker("love", "Que viva el amor", selected = true))
+            tap(awaitPickerSticker("love", "Que viva el amor"))
             awaitMessage("Que viva el amor", "timed-1")
             assertEquals(CommunicationState.READING, chat.uiState.value.communicationState)
+            assertTrue(awaitPickerSticker("gomen", "Lo siento").isEnabled)
             assertNull(findNodeInTag("${CHAT_MESSAGE_TAG_PREFIX}timed-1") { it.text?.toString() == "Leído" })
 
             advanceChat(scenario, scheduler, 800)
             awaitMessage("Leído", "timed-1")
-            tap(awaitPickerSticker("gomen", "Lo siento", selected = false))
-            awaitPickerSticker("gomen", "Lo siento", selected = true)
+            assertTrue(awaitPickerSticker("gomen", "Lo siento").isEnabled)
             val beforeRecreation = chat.uiState.value
 
             scenario.recreate()
             scenario.onActivity { assertSame(chat, showChat(it)) }
-            awaitPickerSticker("gomen", "Lo siento", selected = true)
+            assertTrue(awaitPickerSticker("gomen", "Lo siento").isEnabled)
             assertEquals(beforeRecreation, chat.uiState.value)
             assertEquals(previewIds + "timed-1", chat.messageIds())
+            scenario.onActivity { assertEquals(listOf("love"), sends) }
 
             advanceChat(scenario, scheduler, 600)
             awaitMessage("<3 <3 <3", "timed-2")
             assertEquals(CommunicationState.RESPONDING, chat.uiState.value.communicationState)
-            val selectedDuringReply = awaitPickerSticker("gomen", "Lo siento", selected = true)
-            assertTrue(selectedDuringReply.stickerControl().isEnabled)
-            tap(selectedDuringReply)
+            val activeSticker = awaitPickerSticker("gomen", "Lo siento")
+            assertTrue(activeSticker.isEnabled)
+            tap(activeSticker)
             awaitMessage("Lo siento", "timed-3")
             awaitInReadingArea("timed-3")
             assertEquals(previewIds + (1..3).map { "timed-$it" }, chat.messageIds())
             assertEquals(CommunicationState.RESPONDING, chat.uiState.value.communicationState)
 
             advanceChat(scenario, scheduler, 200)
-            tap(awaitPickerSticker("ok", "De acuerdo", selected = false))
-            tap(awaitPickerSticker("ok", "De acuerdo", selected = true))
+            tap(awaitPickerSticker("ok", "De acuerdo"))
             awaitMessage("De acuerdo", "timed-4")
             val beforeLanguageChange = chat.uiState.value
             scenario.onActivity {
-                assertEquals(listOf("love", "love", "gomen", "gomen", "ok", "ok"), presses)
+                assertEquals(listOf("love", "gomen", "ok"), sends)
                 language.value = "en"
             }
             awaitNode("Minimize")
@@ -346,10 +338,10 @@ class ChatLocalizationTest {
         val scheduler = TestCoroutineScheduler()
         val factory = controlledChatFactory(scheduler)
         val language = mutableStateOf("es")
-        val presses = mutableListOf<String>()
+        val sends = mutableListOf<String>()
         fun showChat(activity: ComponentActivity): ChatViewModel {
             val chat = ViewModelProvider(activity, factory)[ChatViewModel::class.java]
-            activity.setContent { ChatScreen(chat, language.value) { presses.add(it.id) } }
+            activity.setContent { ChatScreen(chat, language.value) { sends.add(it.id) } }
             return chat
         }
 
@@ -357,20 +349,15 @@ class ChatLocalizationTest {
             lateinit var chat: ChatViewModel
             scenario.onActivity {
                 chat = showChat(it)
-                repeat(5) {
-                    assertTrue(chat.onStickerPressed("love", setOf("love")))
-                    assertTrue(chat.onStickerPressed("love", setOf("love")))
-                }
+                repeat(5) { assertTrue(chat.sendSticker("love", setOf("love"))) }
                 scheduler.advanceUntilIdle()
             }
             awaitInReadingArea(chat.messageIds().last())
 
-            val initialPicker = awaitPickerSticker("love", "Que viva el amor", selected = false)
+            val initialPicker = awaitPickerSticker("love", "Que viva el amor")
             assertEquals(CommunicationState.AVAILABLE, chat.uiState.value.communicationState)
-            assertTrue(initialPicker.stickerControl().isEnabled)
+            assertTrue(initialPicker.isEnabled)
             tap(initialPicker)
-            scenario.onActivity { assertEquals("love", chat.uiState.value.selectedStickerId) }
-            tap(awaitPickerSticker("love", "Que viva el amor", selected = true))
             val love = chat.messageIds().last()
             awaitMessage("Que viva el amor", love)
             awaitInReadingArea(love)
@@ -382,22 +369,24 @@ class ChatLocalizationTest {
             val firstReply = chat.messageIds().last()
             awaitMessage("<3 <3 <3", firstReply)
             val end = awaitInReadingArea(firstReply)
-            val activePicker = awaitPickerSticker("ok", "De acuerdo", selected = false)
-            assertTrue(activePicker.stickerControl().isEnabled)
-            tap(activePicker)
-            awaitPickerSticker("ok", "De acuerdo", selected = true)
-            assertEquals(firstReply, chat.messageIds().last())
+            val activePicker = awaitPickerSticker("ok", "De acuerdo")
+            assertTrue(activePicker.isEnabled)
             val panel = panelBounds()
+            val firstCell = boundsOf(activePicker)
+            val secondCell = boundsOf(awaitPickerSticker("saikouka", "¡Tía!"))
+            assertTrue(firstCell.right < secondCell.left)
+            tap((firstCell.right + secondCell.left) / 2f, firstCell.exactCenterY())
             swipe(panel.left + 2, panel.top + 16, panel.bottom - 16)
             assertEquals(end, awaitInReadingArea(firstReply))
-            assertEquals(listOf("love", "love", "ok"), presses)
+            assertEquals(firstReply, chat.messageIds().last())
+            scenario.onActivity { assertEquals(listOf("love"), sends) }
 
-            tap(awaitPickerSticker("ok", "De acuerdo", selected = true))
+            tap(activePicker)
             val ok = chat.messageIds().last()
             awaitMessage("De acuerdo", ok)
             awaitInReadingArea(ok)
             assertNull(findNodeInTag("$CHAT_MESSAGE_TAG_PREFIX$ok") { it.text?.toString() == "Leído" })
-            assertEquals(listOf("love", "love", "ok", "ok"), presses)
+            scenario.onActivity { assertEquals(listOf("love", "ok"), sends) }
 
             swipeHistory(towardEnd = false)
             awaitValue("last send out of the reading area") {
@@ -430,18 +419,19 @@ class ChatLocalizationTest {
             val finalReply = chat.messageIds().last()
             awaitMessage("okaaaay", finalReply)
             awaitInReadingArea(finalReply)
-            assertTrue(awaitPickerSticker("ok", "Okay").stickerControl().isEnabled)
+            assertTrue(awaitPickerSticker("ok", "Okay").isEnabled)
 
             swipeHistory(towardEnd = false)
-            val (olderId, olderBounds) = firstReadableRow()
-            tap(awaitPickerSticker("gomen", "Sorry", selected = false))
-            awaitPickerSticker("gomen", "Sorry", selected = true)
-            assertEquals(finalReply, chat.messageIds().last())
-            assertEquals(olderBounds, awaitInReadingArea(olderId))
-            tap(awaitPickerSticker("gomen", "Sorry", selected = true))
+            awaitValue("final reply out of the reading area") {
+                Unit.takeIf { rowInReadingArea(finalReply) == null }
+            }
+            val beforeSend = chat.messageIds()
+            tap(awaitPickerSticker("gomen", "Sorry"))
             val newSend = chat.messageIds().last()
             awaitMessage("Sorry", newSend)
             awaitInReadingArea(newSend)
+            assertEquals(beforeSend, chat.messageIds().dropLast(1))
+            scenario.onActivity { assertEquals(listOf("love", "ok", "gomen"), sends) }
         }
     }
 
@@ -571,9 +561,50 @@ class ChatLocalizationTest {
     }
 
     @Test
+    fun heldStickerBrightensAndReturnsToIdleAfterCancelOrRelease() {
+        val stickers = StickerRepository.load(context).take(1)
+        val sends = mutableListOf<Sticker>()
+        ActivityScenario.launch(ComponentActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                activity.setContent {
+                    Box(Modifier.safeDrawingPadding().background(JineChatBackground)) {
+                        StickerPicker(
+                            stickers = stickers,
+                            onStickerPressed = sends::add,
+                            descriptionFor = { "De acuerdo" }
+                        )
+                    }
+                }
+            }
+            val bounds = boundsOf(awaitPickerSticker("ok", "De acuerdo"))
+            val idle = capturePixels(scenario, bounds)
+            val x = bounds.exactCenterX()
+            val y = bounds.exactCenterY()
+            for (end in listOf(MotionEvent.ACTION_CANCEL, MotionEvent.ACTION_UP)) {
+                val down = SystemClock.uptimeMillis()
+                sendPointer(down, MotionEvent.ACTION_DOWN, x, y)
+                try {
+                    awaitValue("pressed sticker pixels") {
+                        capturePixels(scenario, bounds).takeUnless { it.contentEquals(idle) }
+                    }
+                    scenario.onActivity { assertTrue(sends.isEmpty()) }
+                } finally {
+                    sendPointer(down, end, x, y)
+                }
+                awaitValue("idle sticker pixels") {
+                    capturePixels(scenario, bounds).takeIf { it.contentEquals(idle) }
+                }
+                scenario.onActivity {
+                    assertEquals(if (end == MotionEvent.ACTION_UP) stickers else emptyList<Sticker>(), sends)
+                }
+            }
+        }
+    }
+
+    @Test
     fun disabledPickerDoesNotEmitAnEvent() {
         val stickers = StickerRepository.load(context).take(1)
-        val selected = mutableListOf<Sticker>()
+        val sends = mutableListOf<Sticker>()
         ActivityScenario.launch(ComponentActivity::class.java).use { scenario ->
             scenario.onActivity { activity ->
                 activity.setContent {
@@ -581,8 +612,7 @@ class ChatLocalizationTest {
                         ProvideLocalizedResources("en") {
                             StickerPicker(
                                 stickers = stickers,
-                                selectedStickerId = stickers.single().id,
-                                onStickerSelected = selected::add,
+                                onStickerPressed = sends::add,
                                 descriptionFor = { "Okay" },
                                 enabled = false,
                                 language = JineLanguageManager.ENGLISH
@@ -591,24 +621,31 @@ class ChatLocalizationTest {
                     }
                 }
             }
-            val label = awaitPickerSticker("ok", "Okay", selected = true)
-            assertFalse(label.stickerControl().isEnabled)
-            tap(label)
-            scenario.onActivity { assertTrue(selected.isEmpty()) }
+            val sticker = awaitPickerSticker("ok", "Okay")
+            assertFalse(sticker.isEnabled)
+            tap(sticker)
+            assertFalse(sticker.performAction(AccessibilityNodeInfo.ACTION_CLICK))
+            scenario.onActivity { assertTrue(sends.isEmpty()) }
         }
     }
 
     @Test
     fun emptyPickerShowsLocalizedStatus() {
+        val sends = mutableListOf<Sticker>()
         ActivityScenario.launch(ComponentActivity::class.java).use { scenario ->
             scenario.onActivity { activity ->
                 activity.setContent {
-                    ProvideLocalizedResources("en") {
-                        StickerPicker(emptyList(), null, {}, { it.descriptionKey })
+                    Box(Modifier.safeDrawingPadding()) {
+                        ProvideLocalizedResources("en") {
+                            StickerPicker(emptyList(), sends::add, { it.descriptionKey })
+                        }
                     }
                 }
             }
-            awaitNode("No stickers available.")
+            val status = awaitNode("No stickers available.")
+            assertFalse(status.isClickable)
+            tap(status)
+            scenario.onActivity { assertTrue(sends.isEmpty()) }
         }
     }
 
@@ -653,8 +690,10 @@ class ChatLocalizationTest {
         return pixels
     }
 
-    private fun awaitPickerSticker(id: String, label: String, selected: Boolean? = null): AccessibilityNodeInfo {
-        return awaitNode(label, selected, "$PICKER_STICKER_TAG_PREFIX$id")
+    private fun awaitPickerSticker(id: String, label: String): AccessibilityNodeInfo = awaitValue("sticker '$id' with label '$label'") {
+        findVisibleNode { it.viewIdResourceName == "$PICKER_STICKER_TAG_PREFIX$id" }?.takeIf { node ->
+            node.findNode { it.contentDescription?.toString() == label } != null
+        }
     }
 
     private fun awaitMessage(label: String, messageId: String): AccessibilityNodeInfo {
@@ -753,12 +792,10 @@ class ChatLocalizationTest {
     // A picker cell and a sent sticker can have the same localized description.
     private fun awaitNode(
         label: String,
-        selected: Boolean? = null,
         withinTag: String? = null
-    ): AccessibilityNodeInfo = awaitValue("'$label' under '$withinTag' (selected: $selected)") {
+    ): AccessibilityNodeInfo = awaitValue("'$label' under '$withinTag'") {
         findNodeInTag(withinTag) { node ->
-            val matches = node.text?.toString() == label || node.contentDescription?.toString() == label
-            matches && (selected == null || node.isStickerSelected() == selected)
+            node.text?.toString() == label || node.contentDescription?.toString() == label
         }
     }
 
@@ -801,14 +838,6 @@ class ChatLocalizationTest {
         return null
     }
 
-    // Compose can expose the description as a child of the checkable selection control.
-    private fun AccessibilityNodeInfo.stickerControl(): AccessibilityNodeInfo {
-        return if (isCheckable) this else parent ?: this
-    }
-
-    @Suppress("DEPRECATION") // Android maps selected controls other than tabs to checked.
-    private fun AccessibilityNodeInfo.isStickerSelected() = stickerControl().isChecked
-
     private fun scrollPickerToLastRow() {
         val column = boundsOf(awaitPickerSticker("ok", "De acuerdo"))
         val panel = panelBounds()
@@ -824,16 +853,21 @@ class ChatLocalizationTest {
 
     private fun tap(node: AccessibilityNodeInfo) {
         val bounds = boundsOf(node)
+        tap(bounds.exactCenterX(), bounds.exactCenterY())
+    }
+
+    private fun tap(x: Float, y: Float) {
         val start = SystemClock.uptimeMillis()
-        for (action in listOf(MotionEvent.ACTION_DOWN, MotionEvent.ACTION_UP)) {
-            val event = MotionEvent.obtain(
-                start, SystemClock.uptimeMillis(), action, bounds.exactCenterX(), bounds.exactCenterY(), 0
-            )
-            try {
-                instrumentation.sendPointerSync(event)
-            } finally {
-                event.recycle()
-            }
+        sendPointer(start, MotionEvent.ACTION_DOWN, x, y)
+        sendPointer(start, MotionEvent.ACTION_UP, x, y)
+    }
+
+    private fun sendPointer(downTime: Long, action: Int, x: Float, y: Float) {
+        val event = MotionEvent.obtain(downTime, SystemClock.uptimeMillis(), action, x, y, 0)
+        try {
+            instrumentation.sendPointerSync(event)
+        } finally {
+            event.recycle()
         }
     }
 
@@ -846,12 +880,7 @@ class ChatLocalizationTest {
                 else -> MotionEvent.ACTION_MOVE
             }
             val y = startY + (endY - startY) * step / 10f
-            val event = MotionEvent.obtain(start, SystemClock.uptimeMillis(), action, x.toFloat(), y, 0)
-            try {
-                instrumentation.sendPointerSync(event)
-            } finally {
-                event.recycle()
-            }
+            sendPointer(start, action, x.toFloat(), y)
             if (step < 10) SystemClock.sleep(stepMillis)
         }
         instrumentation.uiAutomation.waitForIdle(250, 5_000)

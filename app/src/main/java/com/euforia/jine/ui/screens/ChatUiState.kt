@@ -12,7 +12,6 @@ internal enum class CommunicationState {
 
 internal data class ChatUiState(
     val messages: List<Message>,
-    val selectedStickerId: String? = null,
     val communicationState: CommunicationState = CommunicationState.AVAILABLE
 ) {
     // Free chat accepts input in every processing state.

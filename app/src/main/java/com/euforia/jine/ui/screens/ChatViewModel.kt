@@ -55,26 +55,10 @@ internal class ChatViewModel(
     private var preparationInvalidated: CompletableDeferred<Unit>? = null
 
     @MainThread
-    fun reconcileSelection(validStickerIds: Set<String>) {
-        if (!viewModelScope.isActive) return
-        val state = _uiState.value
-        val selectedId = state.selectedStickerId
-        if (selectedId != null && selectedId !in validStickerIds) {
-            _uiState.value = state.copy(selectedStickerId = null)
-        }
-    }
-
-    @MainThread
-    fun onStickerPressed(stickerId: String, validStickerIds: Set<String>): Boolean {
+    fun sendSticker(stickerId: String, validStickerIds: Set<String>): Boolean {
         if (!viewModelScope.isActive) return false
         val state = _uiState.value
-        val result = handleStickerPress(state.selectedStickerId, stickerId, validStickerIds, newMessageId, now)
-            ?: return false
-        val message = result.sentMessage
-        if (message == null) {
-            _uiState.value = state.copy(selectedStickerId = result.selectedStickerId)
-            return true
-        }
+        val message = createStickerMessage(stickerId, validStickerIds, newMessageId, now) ?: return false
 
         val reading = viewModelScope.launch(dispatcher, start = CoroutineStart.LAZY) {
             delay(timings.readMs)
@@ -93,7 +77,6 @@ internal class ChatViewModel(
         // Register and publish the send before starting either job, including with zero delays.
         _uiState.value = state.copy(
             messages = state.messages + message,
-            selectedStickerId = null,
             communicationState = if (state.communicationState == CommunicationState.RESPONDING) {
                 CommunicationState.RESPONDING
             } else {

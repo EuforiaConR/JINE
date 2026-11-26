@@ -5,7 +5,7 @@ import com.euforia.jine.data.model.MessageSender
 import com.euforia.jine.data.model.PCHAN_PACK_ID
 import com.euforia.jine.data.model.Sticker
 import com.euforia.jine.data.model.resolvePchanSticker
-import com.euforia.jine.ui.screens.handleStickerPress
+import com.euforia.jine.ui.screens.createStickerMessage
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
@@ -13,7 +13,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-class StickerSelectionTest {
+class StickerSendingTest {
     private val stickers = listOf("ok", "love").mapIndexed { order, id ->
         Sticker(
             id = id,
@@ -28,24 +28,10 @@ class StickerSelectionTest {
     }.associateBy { it.id }
 
     @Test
-    fun firstPressSelectsAndAnotherStickerReplacesTheSelection() {
-        val first = checkNotNull(handleStickerPress(null, "ok", stickers.keys))
-        assertEquals("ok", first.selectedStickerId)
-        assertNull(first.sentMessage)
-
-        val replacement = checkNotNull(handleStickerPress(first.selectedStickerId, "love", stickers.keys))
-        assertEquals("love", replacement.selectedStickerId)
-        assertNull(replacement.sentMessage)
-    }
-
-    @Test
-    fun pressingTheSelectionCreatesAnUnreadMessageAndClearsTheSelection() {
-        val result = checkNotNull(handleStickerPress("ok", "ok", stickers.keys))
-        assertNull(result.selectedStickerId)
-
-        val message = checkNotNull(result.sentMessage)
-        assertTrue(message.id.isNotBlank())
-        assertTrue(message.sentAt > 0L)
+    fun oneValidStickerCreatesAnUnreadMessageUsingTheSuppliedIdAndTime() {
+        val message = checkNotNull(createStickerMessage("ok", stickers.keys, { "message-1" }, { 123L }))
+        assertEquals("message-1", message.id)
+        assertEquals(123L, message.sentAt)
         assertEquals(MessageSender.PCHAN, message.sender)
         assertEquals(MessageContent.Sticker(PCHAN_PACK_ID, "ok"), message.content)
         assertNull(message.readAt)
@@ -53,20 +39,18 @@ class StickerSelectionTest {
     }
 
     @Test
-    fun repeatedAndDifferentStickersProduceIndependentMessagesInPressOrder() {
-        var selectedStickerId: String? = null
-        val messages = listOf("ok", "ok", "ok", "ok", "love", "love").mapNotNull { id ->
-            val result = checkNotNull(handleStickerPress(selectedStickerId, id, stickers.keys))
-            selectedStickerId = result.selectedStickerId
-            result.sentMessage
+    fun repeatedAndDifferentStickersKeepOrderAndIndependentIdsWithTheSameTimestamp() {
+        var nextId = 0
+        val messages = listOf("ok", "ok", "love").map { id ->
+            checkNotNull(createStickerMessage(id, stickers.keys, { "message-${++nextId}" }, { 123L }))
         }
 
         assertEquals(listOf("ok", "ok", "love"), messages.map {
             (it.content as MessageContent.Sticker).stickerId
         })
-        assertEquals(3, messages.map { it.id }.distinct().size)
+        assertEquals(listOf("message-1", "message-2", "message-3"), messages.map { it.id })
+        assertTrue(messages.all { it.sentAt == 123L })
         assertTrue(messages.none { it.isRead })
-        assertNull(selectedStickerId)
 
         val readCopy = messages[1].copy(readAt = messages[1].sentAt)
         assertEquals(messages[1].id, readCopy.id)
@@ -76,8 +60,11 @@ class StickerSelectionTest {
     }
 
     @Test
-    fun unknownStickerIsIgnoredEvenIfAnOldSelectionMatches() {
-        assertNull(handleStickerPress("unavailable", "unavailable", stickers.keys))
+    fun unknownStickerAndEmptyCatalogDoNotCallTheIdOrClockProviders() {
+        val id = { error("Invalid sticker must not consume a message ID") }
+        val now = { error("Invalid sticker must not read the clock") }
+        assertNull(createStickerMessage("unavailable", stickers.keys, id, now))
+        assertNull(createStickerMessage("ok", emptySet(), id, now))
     }
 
     @Test
