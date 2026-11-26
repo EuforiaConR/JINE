@@ -1,10 +1,14 @@
 package com.euforia.jine
 
 import android.content.res.Configuration
+import android.graphics.Bitmap
 import android.graphics.Rect
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
 import android.view.MotionEvent
+import android.view.PixelCopy
 import android.view.accessibility.AccessibilityNodeInfo
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -31,6 +35,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.util.Locale
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.TimeUnit
 
 @RunWith(AndroidJUnit4::class)
 class ChatLocalizationTest {
@@ -76,6 +82,8 @@ class ChatLocalizationTest {
             }
             tap(firstSticker)
             awaitNode("De acuerdo", selected = true)
+            val spanishLove = boundsOf(awaitNode("Que viva el amor"))
+            val spanishLovePixels = capturePixels(scenario, spanishLove)
             scenario.onActivity { requestedLanguage.value = JineLanguageManager.ENGLISH }
 
             awaitNode("Are you there?")
@@ -84,6 +92,12 @@ class ChatLocalizationTest {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 assertEquals("Sticker selected", englishSticker.stickerControl().stateDescription.toString())
             }
+            val englishLove = boundsOf(awaitNode("Love forever"))
+            assertEquals(spanishLove, englishLove)
+            assertFalse(
+                "The love sticker should change visually with the language",
+                spanishLovePixels.contentEquals(capturePixels(scenario, englishLove))
+            )
             scenario.onActivity { assertEquals(listOf(stickers.first()), selected) }
         }
     }
@@ -101,13 +115,13 @@ class ChatLocalizationTest {
             }
 
             scrollForwardFrom(awaitNode("De acuerdo"))
-            val lastSticker = awaitNode("¡Genial!").stickerControl()
+            val lastSticker = awaitNode("Esto.").stickerControl()
             assertTrue(lastSticker.performAction(AccessibilityNodeInfo.ACTION_CLICK))
-            awaitNode("¡Genial!", selected = true)
+            awaitNode("Esto.", selected = true)
 
             scrollForwardFrom(awaitNode("p-chaaaan!!"))
             awaitNode(lastMessage)
-            awaitNode("¡Genial!", selected = true)
+            awaitNode("Esto.", selected = true)
         }
     }
 
@@ -119,11 +133,18 @@ class ChatLocalizationTest {
             scenario.onActivity { activity ->
                 activity.setContent {
                     ProvideLocalizedResources("en") {
-                        StickerPicker(stickers, null, selected::add, { "Okay" }, enabled = false)
+                        StickerPicker(
+                            stickers = stickers,
+                            selectedStickerId = stickers.single().id,
+                            onStickerSelected = selected::add,
+                            descriptionFor = { "Okay" },
+                            enabled = false,
+                            language = JineLanguageManager.ENGLISH
+                        )
                     }
                 }
             }
-            val label = awaitNode("Okay")
+            val label = awaitNode("Okay", selected = true)
             assertFalse(label.stickerControl().isEnabled)
             tap(label)
             scenario.onActivity { assertTrue(selected.isEmpty()) }
@@ -186,7 +207,7 @@ class ChatLocalizationTest {
     }
 
     private fun tap(node: AccessibilityNodeInfo) {
-        val bounds = Rect().also(node::getBoundsInScreen)
+        val bounds = boundsOf(node)
         val start = SystemClock.uptimeMillis()
         for (action in listOf(MotionEvent.ACTION_DOWN, MotionEvent.ACTION_UP)) {
             val event = MotionEvent.obtain(
@@ -197,6 +218,36 @@ class ChatLocalizationTest {
             } finally {
                 event.recycle()
             }
+        }
+    }
+
+    private fun boundsOf(node: AccessibilityNodeInfo): Rect = Rect().also(node::getBoundsInScreen)
+
+    private fun capturePixels(scenario: ActivityScenario<ComponentActivity>, bounds: Rect): IntArray {
+        instrumentation.uiAutomation.waitForIdle(250, 5_000)
+        val width = bounds.width()
+        val height = bounds.height()
+        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        try {
+            val result = CompletableFuture<Int>()
+            scenario.onActivity { activity ->
+                val location = IntArray(2)
+                activity.window.decorView.getLocationOnScreen(location)
+                val windowBounds = Rect(bounds).apply { offset(-location[0], -location[1]) }
+                PixelCopy.request(
+                    activity.window,
+                    windowBounds,
+                    bitmap,
+                    { result.complete(it) },
+                    Handler(Looper.getMainLooper())
+                )
+            }
+            assertEquals(PixelCopy.SUCCESS, result.get(5, TimeUnit.SECONDS).toInt())
+            return IntArray(width * height).also { pixels ->
+                bitmap.getPixels(pixels, 0, width, 0, 0, width, height)
+            }
+        } finally {
+            bitmap.recycle()
         }
     }
 }

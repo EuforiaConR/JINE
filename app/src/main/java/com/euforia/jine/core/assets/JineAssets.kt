@@ -9,6 +9,7 @@ object JineAssets {
         const val BUTTON_MAXIMIZE = "textures/ui/button_maximize.png"
         const val BUTTON_MINIMIZE = "textures/ui/button_minimize.png"
         const val SCROLL_BAR = "textures/ui/scroll_bar.png"
+        const val ONE_PIXEL = "textures/ui/one_pixel.png"
     }
 
     object Dialogue {

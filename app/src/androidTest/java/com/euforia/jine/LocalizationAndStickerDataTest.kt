@@ -7,6 +7,7 @@ import com.euforia.jine.core.localization.JineLanguageManager
 import com.euforia.jine.core.localization.LocalizationContentException
 import com.euforia.jine.data.repository.StickerCatalogException
 import com.euforia.jine.data.repository.StickerRepository
+import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertSame
@@ -24,17 +25,28 @@ class LocalizationAndStickerDataTest {
     fun loadsAllPackagedStickersInDisplayOrderWithTranslations() {
         val stickers = StickerRepository.load(context)
         assertEquals(
-            listOf("ok", "love", "gomen", "pien", "sorena", "waritodoudemoii", "bujisyuuryou", "saikouka"),
+            listOf("ok", "saikouka", "pien", "waritodoudemoii", "gomen", "bujishibou", "love", "sorena"),
             stickers.map { it.id }
         )
-        assertEquals("textures/stickers/pchan/sticker_saikouka.png", stickers.last().texture)
+        assertEquals((0..7).toList(), stickers.map { it.order })
+
+        for (sticker in stickers) {
+            assertEquals(setOf("es", "en"), sticker.textures.keys)
+            assertEquals(sticker.getTexture("es"), sticker.getTexture("fr"))
+        }
+
         val manager = JineLanguageManager()
         for (language in listOf("es", "en")) {
             val catalog = manager.load(context, language)
             assertEquals(language, catalog.language)
             for (sticker in stickers) {
-                assertTrue(catalog.translate(sticker.descriptionKey).isNotBlank())
-                assertTrue(!catalog.translate(sticker.descriptionKey).startsWith("[missing: "))
+                val expectedPath = "${JineAssets.Stickers.PCHAN_DIRECTORY}/$language/${sticker.id}.png"
+                assertEquals(expectedPath, sticker.getTexture(language))
+                context.assets.open(expectedPath).use { stream -> assertTrue(stream.read() >= 0) }
+
+                val description = catalog.translate(sticker.descriptionKey)
+                assertTrue(description.isNotBlank())
+                assertTrue(!description.startsWith("[missing: "))
             }
         }
     }
@@ -125,35 +137,126 @@ class LocalizationAndStickerDataTest {
     }
 
     @Test
-    fun invalidOrMissingTextureReportsStickerAndPath() {
-        val paths = listOf("textures/stickers/../ui/windowbase_icon.png", "textures/stickers/pchan/missing.png")
-        for (path in paths) {
-            val failure = assertThrows(StickerCatalogException::class.java) {
-                parsePack(sticker(texture = path))
-            }
-            val message = failure.message.orEmpty()
-            assertTrue(message.contains("Sticker 'example'"))
-            assertTrue(message.contains(path))
+    fun spanishOnlyStickerFallsBackForUnlistedLanguages() {
+        val sticker = parsePack(sticker()).single()
+        assertEquals(mapOf("es" to SPANISH_TEXTURE), sticker.textures)
+        assertEquals(SPANISH_TEXTURE, sticker.getTexture("en"))
+        assertEquals(SPANISH_TEXTURE, sticker.getTexture("fr"))
+    }
+
+    @Test
+    fun validatesEveryDeclaredVariantIncludingAdditionalLanguages() {
+        val japaneseTexture = "${JineAssets.Stickers.PCHAN_DIRECTORY}/ja/ok.png"
+        val textures = JSONObject()
+            .put("es", SPANISH_TEXTURE)
+            .put("en", ENGLISH_TEXTURE)
+            .put("ja", japaneseTexture)
+        val checkedPaths = mutableListOf<String>()
+        val sticker = parsePack(sticker(textures = textures), checkTextureExists = checkedPaths::add).single()
+
+        assertEquals(3, checkedPaths.size)
+        assertEquals(setOf(SPANISH_TEXTURE, ENGLISH_TEXTURE, japaneseTexture), checkedPaths.toSet())
+        assertEquals(SPANISH_TEXTURE, sticker.getTexture("es"))
+        assertEquals(ENGLISH_TEXTURE, sticker.getTexture("en"))
+        assertEquals(japaneseTexture, sticker.getTexture("ja"))
+    }
+
+    @Test
+    fun texturesMustBePresentAndAnObject() {
+        val noTextures = sticker().apply { remove("textures") }
+        val wrongTypes = listOf(SPANISH_TEXTURE, JSONArray(), 42, JSONObject.NULL)
+        for (entry in listOf(noTextures) + wrongTypes.map { sticker().put("textures", it) }) {
+            val failure = assertThrows(StickerCatalogException::class.java) { parsePack(entry) }
+            assertTrue(failure.message.orEmpty().contains("'textures' must be an object"))
         }
     }
 
-    private fun parsePack(vararg entries: JSONObject) = StickerRepository.parse(
+    @Test
+    fun texturesRequireSpanishAndNonBlankStringVariants() {
+        val withoutSpanish = listOf(JSONObject(), JSONObject().put("en", ENGLISH_TEXTURE))
+        for (textures in withoutSpanish) {
+            val failure = assertThrows(StickerCatalogException::class.java) {
+                parsePack(sticker(textures = textures))
+            }
+            assertTrue(failure.message.orEmpty().contains("missing default texture 'es'"))
+        }
+
+        val invalidVariants = listOf("" to ENGLISH_TEXTURE, "en" to "", "en" to 42, "en" to JSONObject.NULL)
+        for ((language, variant) in invalidVariants) {
+            val textures = JSONObject().put("es", SPANISH_TEXTURE).put(language, variant)
+            val failure = assertThrows(StickerCatalogException::class.java) {
+                parsePack(sticker(textures = textures))
+            }
+            assertTrue(failure.message.orEmpty().contains("invalid texture for language '$language'"))
+        }
+    }
+
+    @Test
+    fun missingSpanishOrEnglishTextureReportsFullContext() {
+        for (language in listOf("es", "en")) {
+            val path = "${JineAssets.Stickers.PCHAN_DIRECTORY}/$language/missing.png"
+            val textures = JSONObject().put("es", SPANISH_TEXTURE).put(language, path)
+            val failure = assertThrows(StickerCatalogException::class.java) {
+                parsePack(sticker(textures = textures))
+            }
+            assertTextureErrorContext(failure, language, path)
+            assertTrue(failure.message.orEmpty().contains("could not open texture"))
+        }
+    }
+
+    @Test
+    fun invalidPathsAreRejectedBeforeOpeningTheVariant() {
+        val paths = listOf(
+            "textures/ui/windowbase_icon.png",
+            "textures/stickers/../ui/windowbase_icon.png",
+            "${JineAssets.Stickers.PCHAN_DIRECTORY}/en/./ok.png",
+            "${JineAssets.Stickers.PCHAN_DIRECTORY}/en//ok.png",
+            "${JineAssets.Stickers.PCHAN_DIRECTORY}/en\\ok.png",
+            "${JineAssets.Stickers.PCHAN_DIRECTORY}/en/ok.jpg"
+        )
+        for (path in paths) {
+            val textures = JSONObject().put("es", SPANISH_TEXTURE).put("en", path)
+            val failure = assertThrows(StickerCatalogException::class.java) {
+                parsePack(sticker(textures = textures)) { openedPath ->
+                    assertEquals(SPANISH_TEXTURE, openedPath)
+                }
+            }
+            assertTextureErrorContext(failure, "en", path)
+            assertTrue(failure.message.orEmpty().contains("invalid texture"))
+        }
+    }
+
+    private fun assertTextureErrorContext(failure: StickerCatalogException, language: String, path: String) {
+        val message = failure.message.orEmpty()
+        assertTrue(message.contains("'$FIXTURE_PATH'"))
+        assertTrue(message.contains("Sticker 'example'"))
+        assertTrue(message.contains("'$language'"))
+        assertTrue(message.contains("'$path'"))
+    }
+
+    private fun parsePack(
+        vararg entries: JSONObject,
+        checkTextureExists: (String) -> Unit = { path -> context.assets.open(path).close() }
+    ) = StickerRepository.parse(
         FIXTURE_PATH,
-        """{"id":"pchan","stickers":[${entries.joinToString()}]}"""
-    ) { path -> context.assets.open(path).close() }
+        """{"id":"pchan","stickers":[${entries.joinToString()}]}""",
+        checkTextureExists
+    )
 
     private fun sticker(
         id: String = "example",
-        texture: String = "${JineAssets.Stickers.PCHAN_DIRECTORY}/sticker_pchan_ok.png",
+        textures: JSONObject = JSONObject().put("es", SPANISH_TEXTURE),
         order: Int = 0
     ) = JSONObject()
         .put("id", id)
-        .put("texture", texture)
+        .put("textures", textures)
         .put("description_key", "sticker.test.example")
         .put("emotion", "agreement")
         .put("order", order)
 
     private companion object {
         const val FIXTURE_PATH = "stickers/fixture.json"
+        const val SPANISH_TEXTURE = "${JineAssets.Stickers.PCHAN_DIRECTORY}/es/ok.png"
+        const val ENGLISH_TEXTURE = "${JineAssets.Stickers.PCHAN_DIRECTORY}/en/ok.png"
     }
 }

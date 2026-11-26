@@ -64,7 +64,7 @@ object StickerRepository {
                     "Sticker '${sticker.id}' uses duplicate order ${sticker.order}"
                 )
             }
-            validateTexture(catalogPath, sticker, checkTextureExists)
+            validateTextures(catalogPath, sticker, checkTextureExists)
             sticker
         }
 
@@ -80,11 +80,30 @@ object StickerRepository {
 
         return Sticker(
             id = id,
-            texture = entry.requiredString("texture"),
+            textures = readTextures(entry, id),
             descriptionKey = entry.requiredString("description_key"),
             emotion = entry.requiredString("emotion"),
             order = order
         )
+    }
+
+    private fun readTextures(entry: JSONObject, stickerId: String): Map<String, String> {
+        val variants = entry.opt("textures") as? JSONObject
+            ?: throw JSONException("Sticker '$stickerId': 'textures' must be an object")
+
+        val textures = buildMap {
+            for (language in variants.keys()) {
+                val path = variants.opt(language)
+                if (language.isBlank() || path !is String || path.isBlank()) {
+                    throw JSONException("Sticker '$stickerId': invalid texture for language '$language'")
+                }
+                put(language, path)
+            }
+        }
+        if ("es" !in textures) {
+            throw JSONException("Sticker '$stickerId': missing default texture 'es'")
+        }
+        return textures
     }
 
     private fun JSONObject.requiredString(field: String): String {
@@ -95,29 +114,33 @@ object StickerRepository {
         return value
     }
 
-    private fun validateTexture(
+    private fun validateTextures(
         catalogPath: String,
         sticker: Sticker,
         checkTextureExists: (String) -> Unit
     ) {
-        val path = sticker.texture
-        val validPath = path.startsWith("${JineAssets.Stickers.TEXTURES_DIRECTORY}/") &&
-            path.endsWith(".png") &&
-            '\\' !in path &&
-            path.split('/').none { it.isEmpty() || it == "." || it == ".." }
+        for ((language, path) in sticker.textures) {
+            val validPath = path.startsWith("${JineAssets.Stickers.TEXTURES_DIRECTORY}/") &&
+                path.endsWith(".png") &&
+                '\\' !in path &&
+                path.split('/').none { it.isEmpty() || it == "." || it == ".." }
 
-        if (!validPath) {
-            throw StickerCatalogException(catalogPath, "Sticker '${sticker.id}' has invalid texture '$path'")
-        }
+            if (!validPath) {
+                throw StickerCatalogException(
+                    catalogPath,
+                    "Sticker '${sticker.id}' has invalid texture '$path' for '$language'"
+                )
+            }
 
-        try {
-            checkTextureExists(path)
-        } catch (error: IOException) {
-            throw StickerCatalogException(
-                catalogPath,
-                "Sticker '${sticker.id}' could not open texture '$path'",
-                error
-            )
+            try {
+                checkTextureExists(path)
+            } catch (error: IOException) {
+                throw StickerCatalogException(
+                    catalogPath,
+                    "Sticker '${sticker.id}' could not open texture '$path' for '$language'",
+                    error
+                )
+            }
         }
     }
 }

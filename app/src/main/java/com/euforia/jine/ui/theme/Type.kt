@@ -18,6 +18,10 @@ val ZpixFont = FontFamily(
     Font(R.font.zpix)
 )
 
+val DinkieBitmapFont = FontFamily(
+    Font(R.font.dinkie_bitmap_7px)
+)
+
 // Set of Material typography styles to start with
 val Typography = Typography(
     bodyLarge = TextStyle(

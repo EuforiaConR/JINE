@@ -102,7 +102,8 @@ fun ChatScreen(
                                 onStickerSelected(sticker)
                             },
                             descriptionFor = { sticker -> localization.translate(sticker.descriptionKey) },
-                            modifier = panelModifier
+                            modifier = panelModifier,
+                            language = localization.language
                         )
                     }
                 }
