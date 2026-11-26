@@ -41,14 +41,20 @@ import com.euforia.jine.data.model.PCHAN_PACK_ID
 import com.euforia.jine.data.model.Sticker
 import com.euforia.jine.data.repository.StickerRepository
 import com.euforia.jine.ui.components.CHAT_MESSAGE_TAG_PREFIX
+import com.euforia.jine.ui.components.CHAT_HISTORY_TAG
+import com.euforia.jine.ui.components.CHAT_SCROLLBAR_TAG
 import com.euforia.jine.ui.components.ChatMessageItem
 import com.euforia.jine.ui.components.PICKER_STICKER_TAG_PREFIX
 import com.euforia.jine.ui.components.PixelImage
 import com.euforia.jine.ui.components.StickerPicker
 import com.euforia.jine.ui.screens.ChatScreen
+import com.euforia.jine.ui.screens.CHAT_PANEL_TAG
+import com.euforia.jine.ui.screens.ChatContent
 import com.euforia.jine.ui.screens.ChatTimings
+import com.euforia.jine.ui.screens.ChatUiState
 import com.euforia.jine.ui.screens.ChatViewModel
 import com.euforia.jine.ui.screens.CommunicationState
+import com.euforia.jine.ui.screens.initialMessages
 import com.euforia.jine.ui.theme.JineChatBackground
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -165,9 +171,18 @@ class ChatLocalizationTest {
             assertTrue(lastSticker.performAction(AccessibilityNodeInfo.ACTION_CLICK))
             awaitPickerSticker("sorena", "Esto.", selected = true)
 
-            scrollForwardFrom(awaitNode("p-chaaaan!!"))
+            awaitInReadingArea("preview_long_message", wholeRow = false)
+            repeat(4) {
+                if (rowInReadingArea("preview_greeting") == null) {
+                    scrollHistory(AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD)
+                }
+            }
+            awaitInReadingArea("preview_greeting")
+            swipeHistory(towardEnd = true)
             awaitNode(lastMessage)
+            awaitInReadingArea("preview_long_message", wholeRow = false)
             awaitPickerSticker("sorena", "Esto.", selected = true)
+            assertEquals(panelBounds().top, scrollbarBounds().bottom)
         }
     }
 
@@ -177,8 +192,9 @@ class ChatLocalizationTest {
         val presses = mutableListOf<String>()
         val factory = controlledChatFactory(TestCoroutineScheduler())
         ActivityScenario.launch(ComponentActivity::class.java).use { scenario ->
+            lateinit var chat: ChatViewModel
             scenario.onActivity { activity ->
-                val chat = ViewModelProvider(activity, factory)[ChatViewModel::class.java]
+                chat = ViewModelProvider(activity, factory)[ChatViewModel::class.java]
                 activity.setContent {
                     ChatScreen(chat, language = language.value, onStickerSelected = { presses.add(it.id) })
                 }
@@ -186,32 +202,33 @@ class ChatLocalizationTest {
 
             tap(awaitPickerSticker("ok", "De acuerdo", selected = false))
             awaitPickerSticker("ok", "De acuerdo", selected = true)
-            assertEquals(previewIds, visibleMessageIds())
+            assertEquals(previewIds, chat.messageIds())
 
             tap(awaitPickerSticker("love", "Que viva el amor", selected = false))
             awaitPickerSticker("love", "Que viva el amor", selected = true)
             awaitPickerSticker("ok", "De acuerdo", selected = false)
-            assertEquals(previewIds, visibleMessageIds())
+            assertEquals(previewIds, chat.messageIds())
 
             tap(awaitPickerSticker("ok", "De acuerdo", selected = false))
             tap(awaitPickerSticker("ok", "De acuerdo", selected = true))
             awaitPickerSticker("ok", "De acuerdo", selected = false)
-            val firstSend = visibleMessageIds()
+            val firstSend = chat.messageIds()
             assertEquals(4, firstSend.size)
             assertEquals(previewIds, firstSend.take(3))
             val historySticker = awaitMessage("De acuerdo", firstSend.last())
+            awaitInReadingArea(firstSend.last())
             val row = checkNotNull(findVisibleNode { it.viewIdResourceName == "$CHAT_MESSAGE_TAG_PREFIX${firstSend.last()}" })
             assertEquals(boundsOf(row).right, boundsOf(historySticker).right)
             assertFalse(historySticker.isClickable)
             tap(historySticker)
-            assertEquals(firstSend, visibleMessageIds())
+            assertEquals(firstSend, chat.messageIds())
 
             tap(awaitPickerSticker("ok", "De acuerdo", selected = false))
             awaitPickerSticker("ok", "De acuerdo", selected = true)
-            assertEquals(firstSend, visibleMessageIds())
+            assertEquals(firstSend, chat.messageIds())
             tap(awaitPickerSticker("ok", "De acuerdo", selected = true))
             awaitPickerSticker("ok", "De acuerdo", selected = false)
-            val secondSend = visibleMessageIds()
+            val secondSend = chat.messageIds()
             assertEquals(5, secondSend.size)
             assertEquals(firstSend, secondSend.take(4))
             awaitMessage("De acuerdo", secondSend.last())
@@ -219,7 +236,7 @@ class ChatLocalizationTest {
             tap(awaitPickerSticker("love", "Que viva el amor", selected = false))
             tap(awaitPickerSticker("love", "Que viva el amor", selected = true))
             awaitPickerSticker("love", "Que viva el amor", selected = false)
-            val sentIds = visibleMessageIds()
+            val sentIds = chat.messageIds()
             assertEquals(6, sentIds.size)
             assertEquals(secondSend, sentIds.take(5))
             assertEquals(sentIds.size, sentIds.distinct().size)
@@ -231,7 +248,7 @@ class ChatLocalizationTest {
             awaitMessage("Okay", sentIds[3])
             awaitMessage("Okay", sentIds[4])
             awaitMessage("Love forever", sentIds[5])
-            assertEquals(sentIds, visibleMessageIds())
+            assertEquals(sentIds, chat.messageIds())
             assertNull(findVisibleNode { it.text?.toString() == "Read" })
             scenario.onActivity {
                 assertEquals(listOf("ok", "love", "ok", "ok", "ok", "ok", "love", "love"), presses)
@@ -273,7 +290,7 @@ class ChatLocalizationTest {
             scenario.onActivity { assertSame(chat, showChat(it)) }
             awaitPickerSticker("gomen", "Lo siento", selected = true)
             assertEquals(beforeRecreation, chat.uiState.value)
-            assertEquals(previewIds + listOf("timed-1", "timed-2"), visibleMessageIds())
+            assertEquals(previewIds + listOf("timed-1", "timed-2"), chat.messageIds())
 
             advanceChat(scenario, scheduler, 450)
             awaitMessage("Leído", "timed-1")
@@ -307,7 +324,191 @@ class ChatLocalizationTest {
             awaitMessage("okaaaay", "timed-5")
             assertTrue(awaitPickerSticker("ok", "Okay").stickerControl().isEnabled)
             assertEquals(CommunicationState.AVAILABLE, chat.uiState.value.communicationState)
-            assertEquals(previewIds + (1..5).map { "timed-$it" }, visibleMessageIds())
+            assertEquals(previewIds + (1..5).map { "timed-$it" }, chat.messageIds())
+        }
+    }
+
+    @Test
+    fun longHistoryFollowsNewContentAndKeepsTheAnchorWhileReadingOlderMessages() {
+        val scheduler = TestCoroutineScheduler()
+        val factory = controlledChatFactory(scheduler)
+        val language = mutableStateOf("es")
+        val presses = mutableListOf<String>()
+        fun showChat(activity: ComponentActivity): ChatViewModel {
+            val chat = ViewModelProvider(activity, factory)[ChatViewModel::class.java]
+            activity.setContent { ChatScreen(chat, language.value) { presses.add(it.id) } }
+            return chat
+        }
+
+        ActivityScenario.launch(ComponentActivity::class.java).use { scenario ->
+            lateinit var chat: ChatViewModel
+            scenario.onActivity {
+                chat = showChat(it)
+                repeat(5) {
+                    assertTrue(chat.onStickerPressed("love", setOf("love")))
+                    assertTrue(chat.onStickerPressed("love", setOf("love")))
+                }
+                scheduler.advanceUntilIdle()
+            }
+            awaitInReadingArea(chat.messageIds().last())
+
+            val initialPicker = awaitPickerSticker("love", "Que viva el amor", selected = false)
+            assertEquals(CommunicationState.AVAILABLE, chat.uiState.value.communicationState)
+            assertTrue(initialPicker.stickerControl().isEnabled)
+            tap(initialPicker)
+            scenario.onActivity { assertEquals("love", chat.uiState.value.selectedStickerId) }
+            tap(awaitPickerSticker("love", "Que viva el amor", selected = true))
+            val love = chat.messageIds().last()
+            awaitMessage("Que viva el amor", love)
+            awaitInReadingArea(love)
+            advanceChat(scenario, scheduler, 350)
+            tap(awaitPickerSticker("ok", "De acuerdo", selected = false))
+            tap(awaitPickerSticker("ok", "De acuerdo", selected = true))
+            val ok = chat.messageIds().last()
+            awaitMessage("De acuerdo", ok)
+            awaitInReadingArea(ok)
+            advanceChat(scenario, scheduler, 450)
+            awaitMessage("Leído", love)
+            awaitInReadingArea(ok)
+            assertNull(findNodeInTag("$CHAT_MESSAGE_TAG_PREFIX$ok") { it.text?.toString() == "Leído" })
+            advanceChat(scenario, scheduler, 350)
+            awaitMessage("Leído", ok)
+            awaitInReadingArea(ok)
+
+            advanceChat(scenario, scheduler, 600)
+            val firstReply = chat.messageIds().last()
+            awaitMessage("<3 <3 <3", firstReply)
+            val end = awaitInReadingArea(firstReply)
+            val lockedPicker = awaitPickerSticker("ok", "De acuerdo")
+            assertFalse(lockedPicker.stickerControl().isEnabled)
+            tap(lockedPicker)
+            val panel = panelBounds()
+            swipe(panel.left + 2, panel.top + 16, panel.bottom - 16)
+            assertEquals(end, awaitInReadingArea(firstReply))
+            assertEquals(listOf("love", "love", "ok", "ok"), presses)
+
+            swipeHistory(towardEnd = false)
+            awaitValue("last reply out of the reading area") {
+                Unit.takeIf { rowInReadingArea(firstReply) == null }
+            }
+            val (anchorId, anchorBounds) = firstReadableRow()
+            val beforeRecreation = chat.uiState.value
+            scenario.recreate()
+            scenario.onActivity { assertSame(chat, showChat(it)) }
+            assertEquals(beforeRecreation, chat.uiState.value)
+            assertEquals(anchorBounds, awaitInReadingArea(anchorId))
+
+            scenario.onActivity { language.value = "en" }
+            awaitNode("Minimize")
+            assertEquals(beforeRecreation, chat.uiState.value)
+            val translatedAnchor = awaitInReadingArea(anchorId)
+            advanceChat(scenario, scheduler, 500)
+            val secondReply = chat.messageIds().last()
+            assertEquals(MessageContent.Text("dialogue.demo.reply.love.02"), chat.uiState.value.messages.last().content)
+            assertEquals(translatedAnchor, awaitInReadingArea(anchorId))
+            assertNull(rowInReadingArea(secondReply))
+
+            scrollHistoryToBoundary(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD, secondReply)
+            awaitMessage("i have so much to tell you today", secondReply)
+            awaitInReadingArea(secondReply)
+            advanceChat(scenario, scheduler, 600)
+            val finalReply = chat.messageIds().last()
+            awaitMessage("okaaaay", finalReply)
+            awaitInReadingArea(finalReply)
+            assertTrue(awaitPickerSticker("ok", "Okay").stickerControl().isEnabled)
+
+            swipeHistory(towardEnd = false)
+            val (olderId, olderBounds) = firstReadableRow()
+            tap(awaitPickerSticker("gomen", "Sorry", selected = false))
+            awaitPickerSticker("gomen", "Sorry", selected = true)
+            assertEquals(finalReply, chat.messageIds().last())
+            assertEquals(olderBounds, awaitInReadingArea(olderId))
+            tap(awaitPickerSticker("gomen", "Sorry", selected = true))
+            val newSend = chat.messageIds().last()
+            awaitMessage("Sorry", newSend)
+            awaitInReadingArea(newSend)
+        }
+    }
+
+    @Test
+    fun scrollbarTracksHistoryAtBothEndsAndInTheMiddle() {
+        val stickers = StickerRepository.load(context)
+        val base = initialMessages(0L)
+        val history = List(36) { index -> base[index % base.size].copy(id = "bar-$index") }
+        val displayedHistory = mutableStateOf(history)
+        ActivityScenario.launch(ComponentActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                activity.setContent { ChatContent(ChatUiState(displayedHistory.value), "es", stickers) }
+            }
+            awaitInReadingArea(history.last().id)
+            val track = scrollbarBounds()
+            assertEquals(panelBounds().top, track.bottom)
+            val end = thumbRows(scenario, track)
+            assertEquals(track.height() - 1, end.last)
+            assertTrue(end.first > 0)
+
+            scrollHistoryToBoundary(AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD, history.first().id)
+            awaitInReadingArea(history.first().id)
+            assertEquals(0, thumbRows(scenario, track).first)
+            val panel = panelBounds()
+            val overlayWithHistory = capturePixels(scenario, panel)
+            val historyX = boundsOf(awaitTag(CHAT_HISTORY_TAG)).centerX()
+            swipe(historyX, track.centerY() + track.height() / 8, track.centerY(), stepMillis = 40)
+            awaitValue("thumb between the two ends") {
+                val middle = thumbRows(scenario, track)
+                middle.takeIf { it.first > 0 && it.last < track.height() - 1 }
+            }
+
+            scenario.onActivity { displayedHistory.value = emptyList() }
+            awaitValue("empty history") {
+                Unit.takeIf { findVisibleNode { it.viewIdResourceName?.startsWith(CHAT_MESSAGE_TAG_PREFIX) == true } == null }
+            }
+            assertEquals(panel, panelBounds())
+            assertFalse(overlayWithHistory.contentEquals(capturePixels(scenario, panel)))
+            assertEquals(0 until track.height(), thumbRows(scenario, track))
+        }
+    }
+
+    @Test
+    fun compactPanelUsesMeasuredHeightForPickerEmptyAndErrorStates() {
+        val catalog = mutableStateOf<List<Sticker>?>(StickerRepository.load(context))
+        val height = mutableStateOf(260.dp)
+        val base = initialMessages(0L)
+        val history = List(12) { index -> base[index % 2].copy(id = "compact-$index") }
+        ActivityScenario.launch(ComponentActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                activity.setContent {
+                    Box(Modifier.size(320.dp, height.value)) {
+                        ChatContent(ChatUiState(history), "es", catalog.value)
+                    }
+                }
+            }
+            awaitInReadingArea(history.last().id)
+            val compactPanel = panelBounds()
+            assertEquals(compactPanel.top, scrollbarBounds().bottom)
+            scrollForwardFrom(awaitPickerSticker("ok", "De acuerdo"))
+            awaitPickerSticker("sorena", "Esto.")
+            awaitInReadingArea(history.last().id)
+
+            scenario.onActivity { catalog.value = emptyList() }
+            awaitNode("No hay stickers disponibles.")
+            awaitInReadingArea(history.last().id)
+            assertTrue(panelBounds().height() < compactPanel.height())
+            assertEquals(panelBounds().top, scrollbarBounds().bottom)
+
+            scenario.onActivity { catalog.value = null }
+            awaitNode("No se pudieron cargar los stickers.")
+            awaitInReadingArea(history.last().id)
+            assertEquals(panelBounds().top, scrollbarBounds().bottom)
+
+            scenario.onActivity {
+                catalog.value = StickerRepository.load(context)
+                height.value = 650.dp
+            }
+            awaitPickerSticker("sorena", "Esto.")
+            awaitInReadingArea(history.last().id)
+            assertTrue(panelBounds().height() > compactPanel.height())
+            assertEquals(panelBounds().top, scrollbarBounds().bottom)
         }
     }
 
@@ -443,8 +644,81 @@ class ChatLocalizationTest {
         return awaitNode(label, withinTag = "$CHAT_MESSAGE_TAG_PREFIX$messageId")
     }
 
+    private fun ChatViewModel.messageIds() = uiState.value.messages.map { it.id }
+
+    private fun awaitTag(tag: String): AccessibilityNodeInfo = awaitValue(tag) {
+        findVisibleNode { it.viewIdResourceName == tag }
+    }
+
+    private fun panelBounds() = boundsOf(awaitTag(CHAT_PANEL_TAG))
+
+    private fun scrollbarBounds() = boundsOf(awaitTag(CHAT_SCROLLBAR_TAG))
+
+    private fun awaitInReadingArea(id: String, wholeRow: Boolean = true): Rect =
+        awaitValue("row $id above the panel") { rowInReadingArea(id, wholeRow) }
+
+    private fun rowInReadingArea(id: String, wholeRow: Boolean = true): Rect? {
+        val node = findVisibleNode { it.viewIdResourceName == "$CHAT_MESSAGE_TAG_PREFIX$id" } ?: return null
+        val row = boundsOf(node)
+        val area = scrollbarBounds()
+        return row.takeIf {
+            it.bottom in (area.top + 1)..area.bottom && (!wholeRow || it.top >= area.top)
+        }
+    }
+
+    private fun firstReadableRow(): Pair<String, Rect> = visibleMessageIds().firstNotNullOf { id ->
+        rowInReadingArea(id)?.let { id to it }
+    }
+
+    private fun scrollHistory(action: Int) {
+        assertTrue(awaitTag(CHAT_HISTORY_TAG).performAction(action))
+        instrumentation.uiAutomation.waitForIdle(250, 5_000)
+        refreshAccessibility()
+    }
+
+    private fun scrollHistoryToBoundary(action: Int, boundaryMessageId: String) {
+        val forward = action == AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
+        val area = scrollbarBounds()
+        val marginPx = (context.resources.displayMetrics.density * if (forward) 12 else 10).toInt()
+        repeat(15) {
+            val row = rowInReadingArea(boundaryMessageId, wholeRow = !forward)
+            if (row != null) {
+                val edge = if (forward) area.bottom - row.bottom else row.top - area.top
+                if (kotlin.math.abs(edge - marginPx) <= 2) return
+            }
+            if (!awaitTag(CHAT_HISTORY_TAG).performAction(action)) {
+                awaitInReadingArea(boundaryMessageId, wholeRow = !forward)
+                return
+            }
+            instrumentation.uiAutomation.waitForIdle(250, 5_000)
+            refreshAccessibility()
+        }
+        throw AssertionError(
+            "History did not reach its scroll boundary at '$boundaryMessageId', " +
+                "reading area $area, target row ${rowInReadingArea(boundaryMessageId, !forward)}, " +
+                "margin $marginPx, visible rows ${visibleMessageIds()}"
+        )
+    }
+
+    private fun swipeHistory(towardEnd: Boolean) {
+        val area = scrollbarBounds()
+        val history = boundsOf(awaitTag(CHAT_HISTORY_TAG))
+        val start = area.top + area.height() / 8
+        val end = area.bottom - area.height() / 8
+        swipe(history.centerX(), if (towardEnd) end else start, if (towardEnd) start else end)
+    }
+
+    private fun thumbRows(scenario: ActivityScenario<ComponentActivity>, track: Rect): IntRange {
+        val pixels = capturePixels(scenario, track)
+        val rows = (0 until track.height()).filter { y ->
+            pixels[y * track.width() + track.width() / 2] == 0xFFEA9FE7.toInt()
+        }
+        return rows.first()..rows.last()
+    }
+
     private fun visibleMessageIds(): List<String> {
         instrumentation.uiAutomation.waitForIdle(250, 5_000)
+        refreshAccessibility()
         val messages = mutableListOf<Pair<Int, String>>()
         fun collect(node: AccessibilityNodeInfo) {
             val tag = node.viewIdResourceName
@@ -464,18 +738,28 @@ class ChatLocalizationTest {
         label: String,
         selected: Boolean? = null,
         withinTag: String? = null
-    ): AccessibilityNodeInfo {
+    ): AccessibilityNodeInfo = awaitValue("'$label' under '$withinTag' (selected: $selected)") {
+        findNodeInTag(withinTag) { node ->
+            val matches = node.text?.toString() == label || node.contentDescription?.toString() == label
+            matches && (selected == null || node.isStickerSelected() == selected)
+        }
+    }
+
+    private fun <T : Any> awaitValue(description: String, read: () -> T?): T {
         val deadline = SystemClock.uptimeMillis() + 5_000
         do {
-            val found = findNodeInTag(withinTag) { node ->
-                val matches = node.text?.toString() == label || node.contentDescription?.toString() == label
-                matches && (selected == null || node.isStickerSelected() == selected)
-            }
-            if (found != null) return found
+            read()?.let { return it }
             SystemClock.sleep(50)
+            refreshAccessibility()
         } while (SystemClock.uptimeMillis() < deadline)
 
-        throw AssertionError("No visible accessibility node for '$label' under '$withinTag' (selected: $selected)")
+        throw AssertionError("Did not see $description")
+    }
+
+    private fun refreshAccessibility() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            instrumentation.uiAutomation.clearCache()
+        }
     }
 
     private fun findVisibleNode(matches: (AccessibilityNodeInfo) -> Boolean): AccessibilityNodeInfo? {
@@ -531,6 +815,27 @@ class ChatLocalizationTest {
                 event.recycle()
             }
         }
+    }
+
+    private fun swipe(x: Int, startY: Int, endY: Int, stepMillis: Long = 16) {
+        val start = SystemClock.uptimeMillis()
+        for (step in 0..10) {
+            val action = when (step) {
+                0 -> MotionEvent.ACTION_DOWN
+                10 -> MotionEvent.ACTION_UP
+                else -> MotionEvent.ACTION_MOVE
+            }
+            val y = startY + (endY - startY) * step / 10f
+            val event = MotionEvent.obtain(start, SystemClock.uptimeMillis(), action, x.toFloat(), y, 0)
+            try {
+                instrumentation.sendPointerSync(event)
+            } finally {
+                event.recycle()
+            }
+            if (step < 10) SystemClock.sleep(stepMillis)
+        }
+        instrumentation.uiAutomation.waitForIdle(250, 5_000)
+        refreshAccessibility()
     }
 
     private fun boundsOf(node: AccessibilityNodeInfo): Rect = Rect().also(node::getBoundsInScreen)

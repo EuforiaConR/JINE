@@ -1,23 +1,31 @@
 package com.euforia.jine.ui.screens
 
 import android.util.Log
-import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTag
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -35,12 +43,15 @@ import com.euforia.jine.data.model.Sticker
 import com.euforia.jine.data.repository.StickerCatalogException
 import com.euforia.jine.data.repository.StickerRepository
 import com.euforia.jine.ui.components.ChatHeader
-import com.euforia.jine.ui.components.ChatMessageItem
+import com.euforia.jine.ui.components.ChatHistory
+import com.euforia.jine.ui.components.ChatScrollbar
 import com.euforia.jine.ui.components.JINE_UI_SCALE
 import com.euforia.jine.ui.components.JineWindow
 import com.euforia.jine.ui.components.PixelTiledImage
 import com.euforia.jine.ui.components.StickerPanelStatus
 import com.euforia.jine.ui.components.StickerPicker
+
+internal const val CHAT_PANEL_TAG = "chat-sticker-panel"
 
 @Composable
 fun ChatScreen(
@@ -86,7 +97,7 @@ private fun rememberStickerCatalog(): List<Sticker>? {
 }
 
 @Composable
-private fun ChatContent(
+internal fun ChatContent(
     uiState: ChatUiState,
     language: String,
     stickers: List<Sticker>?,
@@ -94,6 +105,7 @@ private fun ChatContent(
 ) {
     val localization = rememberLocalization(language)
     val stickersById = remember(stickers) { stickers.orEmpty().associateBy { it.id } }
+    val historyState = rememberLazyListState()
 
     // The resolved language may be Spanish if the requested catalog was unavailable.
     ProvideLocalizedResources(localization.language) {
@@ -105,34 +117,48 @@ private fun ChatContent(
             )
 
             BoxWithConstraints(Modifier.fillMaxSize()) {
-                val panelModifier = Modifier.heightIn(max = maxHeight * 0.45f)
-                Column(Modifier.fillMaxSize()) {
-                    LazyColumn(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxWidth(),
-                        contentPadding = PaddingValues(
-                            start = 10.dp,
-                            top = 10.dp,
-                            end = 14.dp,
-                            bottom = 12.dp
-                        ),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        items(uiState.messages, key = { it.id }) { message ->
-                            ChatMessageItem(message, localization, stickersById)
-                        }
+                var panelHeightPx by remember { mutableStateOf<Int?>(null) }
+                ChatHistory(
+                    messages = uiState.messages,
+                    localization = localization,
+                    stickersById = stickersById,
+                    state = historyState,
+                    viewport = IntSize(constraints.maxWidth, constraints.maxHeight),
+                    panelHeightPx = panelHeightPx
+                )
+                panelHeightPx?.let { measuredHeight ->
+                    val readingHeight = with(LocalDensity.current) {
+                        (constraints.maxHeight - measuredHeight).coerceAtLeast(0).toDp()
                     }
-
+                    ChatScrollbar(
+                        listState = historyState,
+                        panelHeightPx = measuredHeight,
+                        modifier = Modifier.align(Alignment.TopEnd).height(readingHeight)
+                    )
+                }
+                Box(
+                    Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .heightIn(max = maxHeight * 0.45f)
+                        .onSizeChanged { size -> panelHeightPx = size.height }
+                        .semantics {
+                            testTagsAsResourceId = true
+                            testTag = CHAT_PANEL_TAG
+                        }
+                        .pointerInput(Unit) {
+                            // Hit-test the whole panel, including the gaps, without consuming its grid's gestures.
+                            awaitPointerEventScope { while (true) awaitPointerEvent() }
+                        }
+                ) {
                     if (stickers == null) {
-                        StickerPanelStatus(R.string.sticker_catalog_error, panelModifier)
+                        StickerPanelStatus(R.string.sticker_catalog_error)
                     } else {
                         StickerPicker(
                             stickers = stickers,
                             selectedStickerId = uiState.selectedStickerId?.takeIf { it in stickersById },
                             onStickerSelected = onStickerPressed,
                             descriptionFor = { sticker -> localization.translate(sticker.descriptionKey) },
-                            modifier = panelModifier,
                             enabled = uiState.canSendSticker,
                             language = localization.language
                         )
@@ -141,6 +167,28 @@ private fun ChatContent(
             }
         }
     }
+}
+
+@Preview(name = "Historial largo", showBackground = true, widthDp = 360, heightDp = 780)
+@Preview(name = "Historial compacto", showBackground = true, widthDp = 320, heightDp = 260)
+@Composable
+private fun ChatHistoryPreview() {
+    val texts = initialMessages(0L)
+    val history = List(12) { index ->
+        if (index % 3 == 1) {
+            Message(
+                id = "preview_history_$index",
+                sender = MessageSender.PCHAN,
+                content = MessageContent.Sticker(PCHAN_PACK_ID, "love"),
+                sentAt = index.toLong(),
+                readAt = index.toLong() + 1
+            )
+        } else {
+            val text = if (index % 3 == 0) texts.first() else texts.last()
+            text.copy(id = "preview_history_$index", sentAt = index.toLong())
+        }
+    }
+    ChatContent(ChatUiState(history), JineLanguageManager.DEFAULT_LANGUAGE, rememberStickerCatalog())
 }
 
 @Preview(
