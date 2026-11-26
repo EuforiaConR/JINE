@@ -29,18 +29,18 @@ class StickerSelectionTest {
 
     @Test
     fun firstPressSelectsAndAnotherStickerReplacesTheSelection() {
-        val first = checkNotNull(handleStickerPress(null, "ok", stickers))
+        val first = checkNotNull(handleStickerPress(null, "ok", stickers.keys))
         assertEquals("ok", first.selectedStickerId)
         assertNull(first.sentMessage)
 
-        val replacement = checkNotNull(handleStickerPress(first.selectedStickerId, "love", stickers))
+        val replacement = checkNotNull(handleStickerPress(first.selectedStickerId, "love", stickers.keys))
         assertEquals("love", replacement.selectedStickerId)
         assertNull(replacement.sentMessage)
     }
 
     @Test
     fun pressingTheSelectionCreatesAnUnreadMessageAndClearsTheSelection() {
-        val result = checkNotNull(handleStickerPress("ok", "ok", stickers))
+        val result = checkNotNull(handleStickerPress("ok", "ok", stickers.keys))
         assertNull(result.selectedStickerId)
 
         val message = checkNotNull(result.sentMessage)
@@ -56,7 +56,7 @@ class StickerSelectionTest {
     fun repeatedAndDifferentStickersProduceIndependentMessagesInPressOrder() {
         var selectedStickerId: String? = null
         val messages = listOf("ok", "ok", "ok", "ok", "love", "love").mapNotNull { id ->
-            val result = checkNotNull(handleStickerPress(selectedStickerId, id, stickers))
+            val result = checkNotNull(handleStickerPress(selectedStickerId, id, stickers.keys))
             selectedStickerId = result.selectedStickerId
             result.sentMessage
         }
@@ -77,7 +77,7 @@ class StickerSelectionTest {
 
     @Test
     fun unknownStickerIsIgnoredEvenIfAnOldSelectionMatches() {
-        assertNull(handleStickerPress("unavailable", "unavailable", stickers))
+        assertNull(handleStickerPress("unavailable", "unavailable", stickers.keys))
     }
 
     @Test

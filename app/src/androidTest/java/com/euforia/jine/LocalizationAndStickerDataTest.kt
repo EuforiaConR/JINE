@@ -2,11 +2,14 @@ package com.euforia.jine
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.euforia.jine.core.assets.JineAssetManager
 import com.euforia.jine.core.assets.JineAssets
 import com.euforia.jine.core.localization.JineLanguageManager
 import com.euforia.jine.core.localization.LocalizationContentException
 import com.euforia.jine.data.repository.StickerCatalogException
 import com.euforia.jine.data.repository.StickerRepository
+import com.euforia.jine.ui.screens.GENERIC_DEMO_REPLY
+import com.euforia.jine.ui.screens.demoReplies
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
@@ -47,6 +50,18 @@ class LocalizationAndStickerDataTest {
                 val description = catalog.translate(sticker.descriptionKey)
                 assertTrue(description.isNotBlank())
                 assertTrue(!description.startsWith("[missing: "))
+            }
+        }
+    }
+
+    @Test
+    fun everyDemoReplyHasItsOwnTranslationInBothAssetCatalogs() {
+        val keys = StickerRepository.load(context).flatMap { demoReplies(it.id) } + GENERIC_DEMO_REPLY
+        assertEquals(10, keys.distinct().size)
+        for (path in listOf(JineAssets.Languages.SPANISH, JineAssets.Languages.ENGLISH)) {
+            val catalog = JSONObject(JineAssetManager.getText(context, path))
+            for (key in keys) {
+                assertTrue("Missing translation for $key in $path", (catalog.opt(key) as? String)?.isNotBlank() == true)
             }
         }
     }

@@ -24,6 +24,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.viewmodel.viewModelFactory
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -43,10 +46,17 @@ import com.euforia.jine.ui.components.PICKER_STICKER_TAG_PREFIX
 import com.euforia.jine.ui.components.PixelImage
 import com.euforia.jine.ui.components.StickerPicker
 import com.euforia.jine.ui.screens.ChatScreen
+import com.euforia.jine.ui.screens.ChatTimings
+import com.euforia.jine.ui.screens.ChatViewModel
+import com.euforia.jine.ui.screens.CommunicationState
 import com.euforia.jine.ui.theme.JineChatBackground
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.TestCoroutineScheduler
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -55,6 +65,7 @@ import java.util.Locale
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
 
+@OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(AndroidJUnit4::class)
 class ChatLocalizationTest {
     private val instrumentation get() = InstrumentationRegistry.getInstrumentation()
@@ -164,10 +175,12 @@ class ChatLocalizationTest {
     fun confirmsStickerSendsAndKeepsHistoryIdsAndOrderWhenLanguageChanges() {
         val language = mutableStateOf("es")
         val presses = mutableListOf<String>()
+        val factory = controlledChatFactory(TestCoroutineScheduler())
         ActivityScenario.launch(ComponentActivity::class.java).use { scenario ->
             scenario.onActivity { activity ->
+                val chat = ViewModelProvider(activity, factory)[ChatViewModel::class.java]
                 activity.setContent {
-                    ChatScreen(language = language.value, onStickerSelected = { presses.add(it.id) })
+                    ChatScreen(chat, language = language.value, onStickerSelected = { presses.add(it.id) })
                 }
             }
 
@@ -223,6 +236,78 @@ class ChatLocalizationTest {
             scenario.onActivity {
                 assertEquals(listOf("ok", "love", "ok", "ok", "ok", "ok", "love", "love"), presses)
             }
+        }
+    }
+
+    @Test
+    fun activeBatchSurvivesRecreationAndLocalizesWhileThePickerIsLocked() {
+        val scheduler = TestCoroutineScheduler()
+        val factory = controlledChatFactory(scheduler)
+        val language = mutableStateOf("es")
+        val presses = mutableListOf<String>()
+        fun showChat(activity: ComponentActivity): ChatViewModel {
+            val chat = ViewModelProvider(activity, factory)[ChatViewModel::class.java]
+            activity.setContent {
+                ChatScreen(chat, language = language.value, onStickerSelected = { presses.add(it.id) })
+            }
+            return chat
+        }
+
+        ActivityScenario.launch(ComponentActivity::class.java).use { scenario ->
+            lateinit var chat: ChatViewModel
+            scenario.onActivity { chat = showChat(it) }
+            tap(awaitPickerSticker("love", "Que viva el amor", selected = false))
+            tap(awaitPickerSticker("love", "Que viva el amor", selected = true))
+            awaitMessage("Que viva el amor", "timed-1")
+            assertNull(findNodeInTag("${CHAT_MESSAGE_TAG_PREFIX}timed-1") { it.text?.toString() == "Leído" })
+
+            advanceChat(scenario, scheduler, 350)
+            tap(awaitPickerSticker("ok", "De acuerdo", selected = false))
+            tap(awaitPickerSticker("ok", "De acuerdo", selected = true))
+            awaitMessage("De acuerdo", "timed-2")
+            tap(awaitPickerSticker("gomen", "Lo siento", selected = false))
+            awaitPickerSticker("gomen", "Lo siento", selected = true)
+            val beforeRecreation = chat.uiState.value
+
+            scenario.recreate()
+            scenario.onActivity { assertSame(chat, showChat(it)) }
+            awaitPickerSticker("gomen", "Lo siento", selected = true)
+            assertEquals(beforeRecreation, chat.uiState.value)
+            assertEquals(previewIds + listOf("timed-1", "timed-2"), visibleMessageIds())
+
+            advanceChat(scenario, scheduler, 450)
+            awaitMessage("Leído", "timed-1")
+            assertNull(findNodeInTag("${CHAT_MESSAGE_TAG_PREFIX}timed-2") { it.text?.toString() == "Leído" })
+
+            advanceChat(scenario, scheduler, 200)
+            val locked = awaitPickerSticker("gomen", "Lo siento", selected = false)
+            assertEquals(CommunicationState.RESPONDING, chat.uiState.value.communicationState)
+            assertFalse(locked.stickerControl().isEnabled)
+            val blockedState = chat.uiState.value
+            tap(locked)
+            scenario.onActivity {
+                assertEquals(listOf("love", "love", "ok", "ok", "gomen"), presses)
+                assertEquals(blockedState, chat.uiState.value)
+                language.value = "en"
+            }
+            awaitMessage("Are you there?", "preview_question")
+            awaitMessage("Love forever", "timed-1")
+            awaitMessage("Read", "timed-1")
+            assertEquals(blockedState, chat.uiState.value)
+
+            advanceChat(scenario, scheduler, 150)
+            awaitMessage("Read", "timed-2")
+            advanceChat(scenario, scheduler, 600)
+            awaitMessage("<3 <3 <3", "timed-3")
+            assertFalse(awaitPickerSticker("ok", "Okay").stickerControl().isEnabled)
+            advanceChat(scenario, scheduler, 500)
+            awaitMessage("i have so much to tell you today", "timed-4")
+            assertFalse(awaitPickerSticker("ok", "Okay").stickerControl().isEnabled)
+            advanceChat(scenario, scheduler, 600)
+            awaitMessage("okaaaay", "timed-5")
+            assertTrue(awaitPickerSticker("ok", "Okay").stickerControl().isEnabled)
+            assertEquals(CommunicationState.AVAILABLE, chat.uiState.value.communicationState)
+            assertEquals(previewIds + (1..5).map { "timed-$it" }, visibleMessageIds())
         }
     }
 
@@ -306,6 +391,27 @@ class ChatLocalizationTest {
                 }
             }
             awaitNode("No stickers available.")
+        }
+    }
+
+    private fun controlledChatFactory(scheduler: TestCoroutineScheduler): ViewModelProvider.Factory {
+        var nextId = 0
+        return viewModelFactory {
+            initializer {
+                ChatViewModel(
+                    timings = ChatTimings(admissionMs = 1_000, readMs = 800, replyPreparationMs = 600, replyIntervalMs = 500),
+                    now = { 1_700_000_000_000L + scheduler.currentTime },
+                    newMessageId = { "timed-${++nextId}" },
+                    dispatcher = StandardTestDispatcher(scheduler)
+                )
+            }
+        }
+    }
+
+    private fun advanceChat(scenario: ActivityScenario<ComponentActivity>, scheduler: TestCoroutineScheduler, ms: Long) {
+        scenario.onActivity {
+            scheduler.advanceTimeBy(ms)
+            scheduler.runCurrent()
         }
     }
 

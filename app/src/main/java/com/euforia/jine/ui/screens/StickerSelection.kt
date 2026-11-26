@@ -4,7 +4,6 @@ import com.euforia.jine.data.model.Message
 import com.euforia.jine.data.model.MessageContent
 import com.euforia.jine.data.model.MessageSender
 import com.euforia.jine.data.model.PCHAN_PACK_ID
-import com.euforia.jine.data.model.Sticker
 import java.util.UUID
 
 internal data class StickerPressResult(
@@ -15,18 +14,20 @@ internal data class StickerPressResult(
 internal fun handleStickerPress(
     selectedStickerId: String?,
     pressedStickerId: String,
-    stickersById: Map<String, Sticker>
+    validStickerIds: Set<String>,
+    newMessageId: () -> String = { UUID.randomUUID().toString() },
+    now: () -> Long = System::currentTimeMillis
 ): StickerPressResult? {
-    if (pressedStickerId !in stickersById) return null
+    if (pressedStickerId !in validStickerIds) return null
     if (pressedStickerId != selectedStickerId) return StickerPressResult(pressedStickerId)
 
     return StickerPressResult(
         selectedStickerId = null,
         sentMessage = Message(
-            id = UUID.randomUUID().toString(),
+            id = newMessageId(),
             sender = MessageSender.PCHAN,
             content = MessageContent.Sticker(PCHAN_PACK_ID, pressedStickerId),
-            sentAt = System.currentTimeMillis()
+            sentAt = now()
         )
     )
 }
