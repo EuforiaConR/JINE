@@ -5,18 +5,20 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -37,8 +39,11 @@ private const val MAX_VISIBLE_ROWS = 2
 private const val PANEL_ALPHA = 0.45f
 private const val STICKER_DIMMED_ALPHA = 0.4f
 private const val STICKER_HIGHLIGHTED_ALPHA = 1f
-private val cellHeight = 56.dp
+private val cellHeight = 79.dp
+private val stickerSize = 72.dp
 private val cellSpacing = 6.dp
+private val panelPadding = 8.dp
+private val itemInnerPadding = 2.dp
 
 @Composable
 fun StickerPicker(
@@ -56,7 +61,7 @@ fun StickerPicker(
     }
 
     val rows = minOf(MAX_VISIBLE_ROWS, (stickers.size - 1) / COLUMN_COUNT + 1)
-    val gridHeight = cellHeight * rows + cellSpacing * (rows + 1)
+    val gridHeight = cellHeight * rows + cellSpacing * (rows - 1) + panelPadding * 2
     val selectedDescription = localizedStringResource(R.string.sticker_selected)
     val notSelectedDescription = localizedStringResource(R.string.sticker_not_selected)
 
@@ -66,7 +71,7 @@ fun StickerPicker(
             .fillMaxWidth()
             .height(gridHeight)
             .background(JineStickerOverlay.copy(alpha = PANEL_ALPHA)),
-        contentPadding = PaddingValues(horizontal = 8.dp, vertical = cellSpacing),
+        contentPadding = PaddingValues(panelPadding),
         horizontalArrangement = Arrangement.spacedBy(cellSpacing),
         verticalArrangement = Arrangement.spacedBy(cellSpacing)
     ) {
@@ -91,14 +96,16 @@ fun StickerPicker(
                     .semantics {
                         contentDescription = description
                         stateDescription = if (isSelected) selectedDescription else notSelectedDescription
-                    }
+                    },
+                contentAlignment = Alignment.Center
             ) {
                 PixelImage(
                     path = sticker.getTexture(language),
                     modifier = Modifier
-                        .fillMaxSize()
-                        .padding(5.dp)
-                        .alpha(stickerAlpha)
+                        .padding(itemInnerPadding)
+                        .size(stickerSize)
+                        .alpha(stickerAlpha),
+                    contentScale = ContentScale.Fit
                 )
             }
         }
@@ -112,7 +119,7 @@ internal fun StickerPanelStatus(@StringRes messageId: Int, modifier: Modifier = 
         modifier = modifier
             .fillMaxWidth()
             .background(JineStickerOverlay.copy(alpha = PANEL_ALPHA))
-            .padding(8.dp),
+            .padding(panelPadding),
         color = JineText,
         fontFamily = ZpixFont,
         fontSize = pixelFontSize(14.sp),
