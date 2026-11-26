@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -25,22 +26,31 @@ import com.euforia.jine.core.assets.JineAssets
 import com.euforia.jine.core.localization.JineLanguageManager
 import com.euforia.jine.core.localization.ProvideLocalizedResources
 import com.euforia.jine.core.localization.rememberLocalization
+import com.euforia.jine.data.model.Message
+import com.euforia.jine.data.model.MessageContent
+import com.euforia.jine.data.model.MessageSender
 import com.euforia.jine.data.model.Sticker
 import com.euforia.jine.data.repository.StickerCatalogException
 import com.euforia.jine.data.repository.StickerRepository
 import com.euforia.jine.ui.components.ChatHeader
+import com.euforia.jine.ui.components.ChatMessageItem
 import com.euforia.jine.ui.components.JINE_UI_SCALE
 import com.euforia.jine.ui.components.JineWindow
 import com.euforia.jine.ui.components.PixelTiledImage
-import com.euforia.jine.ui.components.ReceivedMessage
 import com.euforia.jine.ui.components.StickerPanelStatus
 import com.euforia.jine.ui.components.StickerPicker
 
-private val previewMessageKeys = listOf(
-    "dialogue.preview.greeting",
-    "dialogue.preview.question",
-    "dialogue.preview.long_message"
-)
+private fun initialMessages(): List<Message> {
+    val sentAt = System.currentTimeMillis()
+    return listOf("greeting", "question", "long_message").map { name ->
+        Message(
+            id = "preview_$name",
+            sender = MessageSender.AME,
+            content = MessageContent.Text("dialogue.preview.$name"),
+            sentAt = sentAt
+        )
+    }
+}
 
 @Composable
 fun ChatScreen(
@@ -49,9 +59,7 @@ fun ChatScreen(
 ) {
     val context = LocalContext.current
     val localization = rememberLocalization(language)
-    val messages = remember(localization) {
-        previewMessageKeys.map(localization::translate)
-    }
+    var messages by remember { mutableStateOf(initialMessages()) }
     val stickers = remember(context) {
         try {
             StickerRepository.load(context)
@@ -60,7 +68,14 @@ fun ChatScreen(
             null
         }
     }
+    val stickersById = remember(stickers) { stickers.orEmpty().associateBy { it.id } }
     var selectedStickerId by rememberSaveable { mutableStateOf<String?>(null) }
+    val currentSelection = selectedStickerId?.takeIf { it in stickersById }
+    if (currentSelection != selectedStickerId) {
+        SideEffect {
+            if (selectedStickerId?.let { it !in stickersById } == true) selectedStickerId = null
+        }
+    }
 
     // The resolved language may be Spanish if the requested catalog was unavailable.
     ProvideLocalizedResources(localization.language) {
@@ -86,8 +101,8 @@ fun ChatScreen(
                         ),
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        items(messages) { message ->
-                            ReceivedMessage(message = message)
+                        items(messages, key = { it.id }) { message ->
+                            ChatMessageItem(message, localization, stickersById)
                         }
                     }
 
@@ -96,9 +111,12 @@ fun ChatScreen(
                     } else {
                         StickerPicker(
                             stickers = stickers,
-                            selectedStickerId = selectedStickerId,
-                            onStickerSelected = { sticker ->
-                                selectedStickerId = sticker.id
+                            selectedStickerId = currentSelection,
+                            onStickerSelected = stickerPressed@{ sticker ->
+                                val result = handleStickerPress(selectedStickerId, sticker.id, stickersById)
+                                    ?: return@stickerPressed
+                                result.sentMessage?.let { message -> messages = messages + message }
+                                selectedStickerId = result.selectedStickerId
                                 onStickerSelected(sticker)
                             },
                             descriptionFor = { sticker -> localization.translate(sticker.descriptionKey) },

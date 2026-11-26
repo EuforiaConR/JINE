@@ -3,6 +3,7 @@ package com.euforia.jine.data.repository
 import android.content.Context
 import com.euforia.jine.core.assets.JineAssetManager
 import com.euforia.jine.core.assets.JineAssets
+import com.euforia.jine.data.model.PCHAN_PACK_ID
 import com.euforia.jine.data.model.Sticker
 import org.json.JSONArray
 import org.json.JSONException
@@ -13,8 +14,6 @@ class StickerCatalogException(catalogPath: String, details: String, cause: Excep
     IllegalStateException("Invalid sticker catalog '$catalogPath': $details", cause)
 
 object StickerRepository {
-    private const val PCHAN_PACK_ID = "pchan"
-
     fun load(context: Context, catalogPath: String = JineAssets.Stickers.PCHAN_CATALOG): List<Sticker> {
         val json = try {
             JineAssetManager.getText(context, catalogPath)

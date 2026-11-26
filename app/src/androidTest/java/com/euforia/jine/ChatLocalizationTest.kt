@@ -1,5 +1,6 @@
 package com.euforia.jine
 
+import android.accessibilityservice.AccessibilityServiceInfo
 import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.Rect
@@ -12,7 +13,10 @@ import android.view.PixelCopy
 import android.view.accessibility.AccessibilityNodeInfo
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
@@ -23,15 +27,28 @@ import androidx.compose.ui.unit.dp
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.euforia.jine.core.assets.JineAssets
 import com.euforia.jine.core.localization.JineLanguageManager
 import com.euforia.jine.core.localization.ProvideLocalizedResources
+import com.euforia.jine.core.localization.rememberLocalization
+import com.euforia.jine.data.model.Message
+import com.euforia.jine.data.model.MessageContent
+import com.euforia.jine.data.model.MessageSender
+import com.euforia.jine.data.model.PCHAN_PACK_ID
 import com.euforia.jine.data.model.Sticker
 import com.euforia.jine.data.repository.StickerRepository
+import com.euforia.jine.ui.components.CHAT_MESSAGE_TAG_PREFIX
+import com.euforia.jine.ui.components.ChatMessageItem
+import com.euforia.jine.ui.components.PICKER_STICKER_TAG_PREFIX
+import com.euforia.jine.ui.components.PixelImage
 import com.euforia.jine.ui.components.StickerPicker
 import com.euforia.jine.ui.screens.ChatScreen
+import com.euforia.jine.ui.theme.JineChatBackground
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.util.Locale
@@ -42,6 +59,16 @@ import java.util.concurrent.TimeUnit
 class ChatLocalizationTest {
     private val instrumentation get() = InstrumentationRegistry.getInstrumentation()
     private val context get() = instrumentation.targetContext
+    private val previewIds = listOf("preview_greeting", "preview_question", "preview_long_message")
+
+    @Before
+    fun exposeAccessibilityResourceIds() {
+        val automation = instrumentation.uiAutomation
+        automation.serviceInfo = automation.serviceInfo.apply {
+            flags = flags or AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS or
+                AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS
+        }
+    }
 
     @Test
     fun startsInSpanishOnEnglishDeviceAndChangesLanguageWithSelectionIntact() {
@@ -63,41 +90,49 @@ class ChatLocalizationTest {
                 }
             }
 
+            awaitNode("p-chaaaan!!")
             awaitNode("¿Estás ahí?")
+            awaitNode("Tengo muchas cosas que contarte hoy. Espero que podamos hablar un rato.")
             awaitNode("Minimizar")
+            assertEquals(previewIds, visibleMessageIds())
 
             val spanish = JineLanguageManager().load(context, "es")
             val positions = stickers.map { sticker ->
-                val node = awaitNode(spanish.translate(sticker.descriptionKey))
-                Rect().also(node::getBoundsInScreen)
+                boundsOf(awaitPickerSticker(sticker.id, spanish.translate(sticker.descriptionKey)))
             }
             assertEquals(4, positions.take(4).map { it.left }.distinct().size)
             assertEquals(1, positions.take(4).map { it.top }.distinct().size)
             assertEquals(1, positions.drop(4).map { it.top }.distinct().size)
             assertTrue(positions[4].top > positions[0].top)
 
-            val firstSticker = awaitNode("De acuerdo")
+            val firstSticker = awaitPickerSticker("ok", "De acuerdo", selected = false)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 assertEquals("Sin seleccionar", firstSticker.stickerControl().stateDescription.toString())
             }
             tap(firstSticker)
-            awaitNode("De acuerdo", selected = true)
-            val spanishLove = boundsOf(awaitNode("Que viva el amor"))
+            awaitPickerSticker("ok", "De acuerdo", selected = true)
+            val spanishLove = boundsOf(awaitPickerSticker("love", "Que viva el amor"))
             val spanishLovePixels = capturePixels(scenario, spanishLove)
             scenario.onActivity { requestedLanguage.value = JineLanguageManager.ENGLISH }
 
             awaitNode("Are you there?")
             awaitNode("Minimize")
-            val englishSticker = awaitNode("Okay", selected = true)
+            instrumentation.uiAutomation.waitForIdle(250, 5_000)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                // Read the current semantics tree after the locale change, including off-focus cells.
+                instrumentation.uiAutomation.clearCache()
+            }
+            val englishSticker = awaitPickerSticker("ok", "Okay", selected = true)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 assertEquals("Sticker selected", englishSticker.stickerControl().stateDescription.toString())
             }
-            val englishLove = boundsOf(awaitNode("Love forever"))
+            val englishLove = boundsOf(awaitPickerSticker("love", "Love forever"))
             assertEquals(spanishLove, englishLove)
             assertFalse(
                 "The love sticker should change visually with the language",
                 spanishLovePixels.contentEquals(capturePixels(scenario, englishLove))
             )
+            assertEquals(previewIds, visibleMessageIds())
             scenario.onActivity { assertEquals(listOf(stickers.first()), selected) }
         }
     }
@@ -114,14 +149,123 @@ class ChatLocalizationTest {
                 }
             }
 
-            scrollForwardFrom(awaitNode("De acuerdo"))
-            val lastSticker = awaitNode("Esto.").stickerControl()
+            scrollForwardFrom(awaitPickerSticker("ok", "De acuerdo"))
+            val lastSticker = awaitPickerSticker("sorena", "Esto.").stickerControl()
             assertTrue(lastSticker.performAction(AccessibilityNodeInfo.ACTION_CLICK))
-            awaitNode("Esto.", selected = true)
+            awaitPickerSticker("sorena", "Esto.", selected = true)
 
             scrollForwardFrom(awaitNode("p-chaaaan!!"))
             awaitNode(lastMessage)
-            awaitNode("Esto.", selected = true)
+            awaitPickerSticker("sorena", "Esto.", selected = true)
+        }
+    }
+
+    @Test
+    fun confirmsStickerSendsAndKeepsHistoryIdsAndOrderWhenLanguageChanges() {
+        val language = mutableStateOf("es")
+        val presses = mutableListOf<String>()
+        ActivityScenario.launch(ComponentActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                activity.setContent {
+                    ChatScreen(language = language.value, onStickerSelected = { presses.add(it.id) })
+                }
+            }
+
+            tap(awaitPickerSticker("ok", "De acuerdo", selected = false))
+            awaitPickerSticker("ok", "De acuerdo", selected = true)
+            assertEquals(previewIds, visibleMessageIds())
+
+            tap(awaitPickerSticker("love", "Que viva el amor", selected = false))
+            awaitPickerSticker("love", "Que viva el amor", selected = true)
+            awaitPickerSticker("ok", "De acuerdo", selected = false)
+            assertEquals(previewIds, visibleMessageIds())
+
+            tap(awaitPickerSticker("ok", "De acuerdo", selected = false))
+            tap(awaitPickerSticker("ok", "De acuerdo", selected = true))
+            awaitPickerSticker("ok", "De acuerdo", selected = false)
+            val firstSend = visibleMessageIds()
+            assertEquals(4, firstSend.size)
+            assertEquals(previewIds, firstSend.take(3))
+            val historySticker = awaitMessage("De acuerdo", firstSend.last())
+            val row = checkNotNull(findVisibleNode { it.viewIdResourceName == "$CHAT_MESSAGE_TAG_PREFIX${firstSend.last()}" })
+            assertEquals(boundsOf(row).right, boundsOf(historySticker).right)
+            assertFalse(historySticker.isClickable)
+            tap(historySticker)
+            assertEquals(firstSend, visibleMessageIds())
+
+            tap(awaitPickerSticker("ok", "De acuerdo", selected = false))
+            awaitPickerSticker("ok", "De acuerdo", selected = true)
+            assertEquals(firstSend, visibleMessageIds())
+            tap(awaitPickerSticker("ok", "De acuerdo", selected = true))
+            awaitPickerSticker("ok", "De acuerdo", selected = false)
+            val secondSend = visibleMessageIds()
+            assertEquals(5, secondSend.size)
+            assertEquals(firstSend, secondSend.take(4))
+            awaitMessage("De acuerdo", secondSend.last())
+
+            tap(awaitPickerSticker("love", "Que viva el amor", selected = false))
+            tap(awaitPickerSticker("love", "Que viva el amor", selected = true))
+            awaitPickerSticker("love", "Que viva el amor", selected = false)
+            val sentIds = visibleMessageIds()
+            assertEquals(6, sentIds.size)
+            assertEquals(secondSend, sentIds.take(5))
+            assertEquals(sentIds.size, sentIds.distinct().size)
+            awaitMessage("Que viva el amor", sentIds.last())
+            assertNull(findVisibleNode { it.text?.toString() == "Leído" })
+
+            scenario.onActivity { language.value = "en" }
+            awaitMessage("Are you there?", "preview_question")
+            awaitMessage("Okay", sentIds[3])
+            awaitMessage("Okay", sentIds[4])
+            awaitMessage("Love forever", sentIds[5])
+            assertEquals(sentIds, visibleMessageIds())
+            assertNull(findVisibleNode { it.text?.toString() == "Read" })
+            scenario.onActivity {
+                assertEquals(listOf("ok", "love", "ok", "ok", "ok", "ok", "love", "love"), presses)
+            }
+        }
+    }
+
+    @Test
+    fun readReceiptBelongsToOneMessageAndSentImageMatchesTheLocalizedAsset() {
+        val language = mutableStateOf("es")
+        val stickersById = StickerRepository.load(context).associateBy { it.id }
+        val sticker = MessageContent.Sticker(PCHAN_PACK_ID, "love")
+        val unread = Message("unread", MessageSender.PCHAN, sticker, sentAt = 1L)
+        val read = Message("read", MessageSender.PCHAN, sticker, sentAt = 2L, readAt = 3L)
+        val unavailable = listOf(
+            unread.copy(id = "wrong_pack", content = sticker.copy(packId = "ame")),
+            unread.copy(id = "unknown_sticker", content = sticker.copy(stickerId = "unknown")),
+            unread.copy(id = "ame_sticker", sender = MessageSender.AME),
+            unread.copy(id = "pchan_text", content = MessageContent.Text("dialogue.preview.greeting"))
+        )
+        ActivityScenario.launch(ComponentActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                activity.setContent {
+                    val localization = rememberLocalization(language.value)
+                    ProvideLocalizedResources(localization.language) {
+                        Column(Modifier.fillMaxWidth().background(JineChatBackground)) {
+                            ChatMessageItem(unread, localization, stickersById)
+                            ChatMessageItem(read, localization, stickersById)
+                            for (message in unavailable) {
+                                ChatMessageItem(message, localization, stickersById)
+                            }
+                            PixelImage(
+                                path = "${JineAssets.Stickers.PCHAN_DIRECTORY}/${localization.language}/love.png",
+                                modifier = Modifier.size(72.dp),
+                                contentDescription = "Reference sprite"
+                            )
+                        }
+                    }
+                }
+            }
+
+            unavailable.forEach { awaitMessage("Mensaje no disponible", it.id) }
+            val spanish = checkReadSticker(scenario, "Que viva el amor", "Leído", read.id, unread.id)
+            scenario.onActivity { language.value = "en" }
+            unavailable.forEach { awaitMessage("Message unavailable", it.id) }
+            val english = checkReadSticker(scenario, "Love forever", "Read", read.id, unread.id)
+            assertFalse(spanish.contentEquals(english))
         }
     }
 
@@ -144,7 +288,7 @@ class ChatLocalizationTest {
                     }
                 }
             }
-            val label = awaitNode("Okay", selected = true)
+            val label = awaitPickerSticker("ok", "Okay", selected = true)
             assertFalse(label.stickerControl().isEnabled)
             tap(label)
             scenario.onActivity { assertTrue(selected.isEmpty()) }
@@ -165,24 +309,86 @@ class ChatLocalizationTest {
         }
     }
 
-    // The platform accessibility tree lets the test verify labels, bounds and real taps.
-    private fun awaitNode(label: String, selected: Boolean = false): AccessibilityNodeInfo {
+    private fun checkReadSticker(
+        scenario: ActivityScenario<ComponentActivity>,
+        description: String,
+        receipt: String,
+        readId: String,
+        unreadId: String
+    ): IntArray {
+        awaitMessage(description, unreadId)
+        val sticker = boundsOf(awaitMessage(description, readId))
+        val readLabel = boundsOf(awaitMessage(receipt, readId))
+        assertNull(findNodeInTag("$CHAT_MESSAGE_TAG_PREFIX$unreadId") { it.text?.toString() == receipt })
+        assertEquals(sticker.left, readLabel.left)
+        assertTrue(readLabel.top >= sticker.bottom)
+
+        val pixels = capturePixels(scenario, sticker)
+        val expectedPixels = capturePixels(scenario, boundsOf(awaitNode("Reference sprite")))
+        assertTrue("The sent sticker should display the exact localized PNG", pixels.contentEquals(expectedPixels))
+        return pixels
+    }
+
+    private fun awaitPickerSticker(id: String, label: String, selected: Boolean? = null): AccessibilityNodeInfo {
+        return awaitNode(label, selected, "$PICKER_STICKER_TAG_PREFIX$id")
+    }
+
+    private fun awaitMessage(label: String, messageId: String): AccessibilityNodeInfo {
+        return awaitNode(label, withinTag = "$CHAT_MESSAGE_TAG_PREFIX$messageId")
+    }
+
+    private fun visibleMessageIds(): List<String> {
+        instrumentation.uiAutomation.waitForIdle(250, 5_000)
+        val messages = mutableListOf<Pair<Int, String>>()
+        fun collect(node: AccessibilityNodeInfo) {
+            val tag = node.viewIdResourceName
+            if (node.isVisibleToUser && tag != null && tag.startsWith(CHAT_MESSAGE_TAG_PREFIX)) {
+                messages.add(boundsOf(node).top to tag.removePrefix(CHAT_MESSAGE_TAG_PREFIX))
+            }
+            for (index in 0 until node.childCount) {
+                node.getChild(index)?.let(::collect)
+            }
+        }
+        instrumentation.uiAutomation.rootInActiveWindow?.let(::collect)
+        return messages.sortedBy { it.first }.map { it.second }
+    }
+
+    // A picker cell and a sent sticker can have the same localized description.
+    private fun awaitNode(
+        label: String,
+        selected: Boolean? = null,
+        withinTag: String? = null
+    ): AccessibilityNodeInfo {
         val deadline = SystemClock.uptimeMillis() + 5_000
         do {
-            val root = instrumentation.uiAutomation.rootInActiveWindow
-            val found = root?.findNode(label, selected)
+            val found = findNodeInTag(withinTag) { node ->
+                val matches = node.text?.toString() == label || node.contentDescription?.toString() == label
+                matches && (selected == null || node.isStickerSelected() == selected)
+            }
             if (found != null) return found
             SystemClock.sleep(50)
         } while (SystemClock.uptimeMillis() < deadline)
 
-        throw AssertionError("No visible accessibility node for '$label' (selected required: $selected)")
+        throw AssertionError("No visible accessibility node for '$label' under '$withinTag' (selected: $selected)")
     }
 
-    private fun AccessibilityNodeInfo.findNode(label: String, selected: Boolean): AccessibilityNodeInfo? {
-        val matches = text?.toString() == label || contentDescription?.toString() == label
-        if (matches && isVisibleToUser && (!selected || isStickerSelected())) return this
+    private fun findVisibleNode(matches: (AccessibilityNodeInfo) -> Boolean): AccessibilityNodeInfo? {
+        return findNodeInTag(null, matches)
+    }
+
+    private fun findNodeInTag(
+        tag: String?,
+        matches: (AccessibilityNodeInfo) -> Boolean
+    ): AccessibilityNodeInfo? {
+        val root = instrumentation.uiAutomation.rootInActiveWindow ?: return null
+        val scope = if (tag == null) root else root.findNode { it.viewIdResourceName == tag }
+        return scope?.findNode(matches)
+    }
+
+    private fun AccessibilityNodeInfo.findNode(matches: (AccessibilityNodeInfo) -> Boolean): AccessibilityNodeInfo? {
+        if (isVisibleToUser && matches(this)) return this
         for (index in 0 until childCount) {
-            val found = getChild(index)?.findNode(label, selected)
+            val found = getChild(index)?.findNode(matches)
             if (found != null) return found
         }
         return null

@@ -23,6 +23,8 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.testTag
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.euforia.jine.R
@@ -34,6 +36,7 @@ import com.euforia.jine.ui.theme.JineText
 import com.euforia.jine.ui.theme.ZpixFont
 import com.euforia.jine.ui.theme.pixelFontSize
 
+internal const val PICKER_STICKER_TAG_PREFIX = "sticker-picker-"
 private const val COLUMN_COUNT = 4
 private const val MAX_VISIBLE_ROWS = 2
 private const val PANEL_ALPHA = 0.45f
@@ -96,6 +99,8 @@ fun StickerPicker(
                     .semantics {
                         contentDescription = description
                         stateDescription = if (isSelected) selectedDescription else notSelectedDescription
+                        testTagsAsResourceId = true
+                        testTag = "$PICKER_STICKER_TAG_PREFIX${sticker.id}"
                     },
                 contentAlignment = Alignment.Center
             ) {

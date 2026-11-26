@@ -5,6 +5,8 @@
     <string name="chat_window_maximize">Maximizar</string>
     <string name="chat_window_close">Cerrar</string>
     <string name="chat_ame_avatar">Avatar de Ame-chan</string>
+    <string name="chat_message_read">Leído</string>
+    <string name="chat_message_unavailable">Mensaje no disponible</string>
     <string name="sticker_catalog_error">No se pudieron cargar los stickers.</string>
     <string name="sticker_catalog_empty">No hay stickers disponibles.</string>
     <string name="sticker_selected">Sticker seleccionado</string>

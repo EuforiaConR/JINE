@@ -1,5 +1,7 @@
 package com.euforia.jine.data.model
 
+internal const val PCHAN_PACK_ID = "pchan"
+
 data class Sticker(
     val id: String,
     val textures: Map<String, String>,
