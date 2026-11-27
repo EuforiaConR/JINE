@@ -22,6 +22,15 @@ object JineAssets {
         const val STREAM_DEMO = "$DIALOGUES_DIRECTORY/demo/stream.json"
     }
 
+    object Audio {
+        object Sfx {
+            private const val DIRECTORY = "audio/sfx"
+            const val CLICK = "$DIRECTORY/poko_click.wav"
+            const val SEND_STAMP = "$DIRECTORY/jine_send_stamp.wav"
+            const val RECEIVE = "$DIRECTORY/jine_recieve.wav"
+        }
+    }
+
     object Backgrounds {
         const val JINE = "textures/backgrounds/jine_bg.png"
     }

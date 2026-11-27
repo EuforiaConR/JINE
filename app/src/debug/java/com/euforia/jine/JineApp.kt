@@ -18,6 +18,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import com.euforia.jine.core.assets.JineAssets
+import com.euforia.jine.core.audio.ChatSoundCoordinator
 import com.euforia.jine.data.model.dialogue.DialogueDefinition
 import com.euforia.jine.data.repository.DialogueContentException
 import com.euforia.jine.data.repository.DialogueRepository
@@ -29,6 +30,7 @@ import kotlinx.coroutines.withContext
 @Composable
 internal fun JineApp(
     chat: ChatViewModel,
+    sounds: ChatSoundCoordinator? = null,
     loadDialogue: (Context) -> DialogueDefinition = { DialogueRepository.load(it, JineAssets.Dialogues.STREAM_DEMO) }
 ) {
     val context = LocalContext.current.applicationContext
@@ -49,7 +51,7 @@ internal fun JineApp(
 
     Column(Modifier.fillMaxSize().navigationBarsPadding()) {
         Box(Modifier.weight(1f)) {
-            ChatScreen(chat)
+            ChatScreen(chat, sounds = sounds)
         }
         TextButton(
             onClick = {

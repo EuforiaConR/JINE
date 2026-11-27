@@ -42,15 +42,28 @@ import androidx.compose.ui.platform.createLifecycleAwareWindowRecomposer
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.DefaultLifecycleObserver
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.viewmodel.viewModelFactory
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.euforia.jine.core.audio.ChatSoundCoordinator
+import com.euforia.jine.core.audio.SoundEffect
+import com.euforia.jine.core.audio.SoundEffectPlayer
 import com.euforia.jine.core.localization.ProvideLocalizedResources
 import com.euforia.jine.core.localization.rememberLocalization
 import com.euforia.jine.data.model.Message
 import com.euforia.jine.data.model.MessageContent
 import com.euforia.jine.data.model.MessageSender
 import com.euforia.jine.data.model.PCHAN_PACK_ID
+import com.euforia.jine.data.model.dialogue.DialogueAction
+import com.euforia.jine.data.model.dialogue.DialogueDefinition
+import com.euforia.jine.data.model.dialogue.DialogueNode
+import com.euforia.jine.data.model.dialogue.DialogueOption
 import com.euforia.jine.data.repository.StickerRepository
 import com.euforia.jine.ui.components.CHAT_CHOICE_PANEL_TAG
 import com.euforia.jine.ui.components.CHAT_CHOICE_TAG_PREFIX
@@ -58,7 +71,10 @@ import com.euforia.jine.ui.components.CHAT_HISTORY_TAG
 import com.euforia.jine.ui.components.CHAT_MESSAGE_TAG_PREFIX
 import com.euforia.jine.ui.components.ChatHistory
 import com.euforia.jine.ui.components.DialogueChoicePanel
+import com.euforia.jine.ui.components.PICKER_STICKER_TAG_PREFIX
 import com.euforia.jine.ui.screens.ChatInputMode
+import com.euforia.jine.ui.screens.ChatScreen
+import com.euforia.jine.ui.screens.ChatViewModel
 import com.euforia.jine.ui.screens.DialogueChoice
 import com.euforia.jine.ui.theme.ChatAnimationSpec
 import com.euforia.jine.ui.theme.JINE_PANEL_OVERLAY_ALPHA
@@ -69,6 +85,9 @@ import com.euforia.jine.ui.theme.JineSentBubble
 import com.euforia.jine.ui.theme.JineStickerOverlay
 import com.euforia.jine.ui.theme.JineText
 import com.euforia.jine.ui.theme.LocalChatAnimationSpec
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.TestCoroutineScheduler
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Assert.assertNull
@@ -80,7 +99,7 @@ import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.abs
 
-@OptIn(InternalComposeUiApi::class)
+@OptIn(InternalComposeUiApi::class, ExperimentalCoroutinesApi::class)
 @RunWith(AndroidJUnit4::class)
 class ChatAnimationTest {
     private val motion = TestMotionScale()
@@ -357,6 +376,175 @@ class ChatAnimationTest {
         assertHasColor(row("no-fade").pixels(), JineBubble)
         at(200)
         assertHasColor(row("scaled").pixels(), faded(JineBubble, 0.25f))
+    }
+
+    @Test
+    fun realScreenSoundsOnlyAcceptedActionsAndUsesTheFrameThatCompletesTheSend() = withHost {
+        val scheduler = TestCoroutineScheduler()
+        val audio = RecordingSounds(scheduler)
+        val language = mutableStateOf("es")
+        val chat = attachSoundChat(scheduler, audio, language)
+        val ok = awaitTag("${PICKER_STICKER_TAG_PREFIX}ok")
+        assertTrue(audio.effects.isEmpty())
+        val initial = chat.uiState.value.messages
+
+        val bounds = boundsOf(ok)
+        val down = SystemClock.uptimeMillis()
+        pointer(down, MotionEvent.ACTION_DOWN, bounds.exactCenterX(), bounds.exactCenterY())
+        pointer(down, MotionEvent.ACTION_CANCEL, bounds.exactCenterX(), bounds.exactCenterY())
+        assertEquals(initial, chat.uiState.value.messages)
+        assertTrue(audio.effects.isEmpty())
+
+        tap(ok)
+        settle()
+        val outgoing = chat.uiState.value.messages.last()
+        assertEquals(MessageContent.Sticker(PCHAN_PACK_ID, "ok"), outgoing.content)
+        assertEquals(listOf(SoundEffect.CLICK), audio.effects)
+        at(199)
+        assertEquals(listOf(SoundEffect.CLICK), audio.effects)
+        at(200)
+        assertEquals(listOf(SoundEffect.CLICK, SoundEffect.SEND_STAMP), audio.effects)
+
+        advanceChatTime(scheduler, 650)
+        assertTrue(chat.uiState.value.messages.last().isRead)
+        onMain { language.value = "en" }
+        settle()
+        assertEquals(listOf(SoundEffect.CLICK, SoundEffect.SEND_STAMP), audio.effects)
+        advanceChatTime(scheduler, 950)
+        assertEquals(MessageSender.AME, chat.uiState.value.messages.last().sender)
+        assertEquals(listOf(1_600L), audio.receiveTimes)
+        advanceChatTime(scheduler, 500)
+        assertEquals(listOf(1_600L), audio.receiveTimes)
+
+        // Keep the old picker rendered while the ViewModel has already closed admission.
+        val stalePicker = awaitTag("${PICKER_STICKER_TAG_PREFIX}ok")
+        val beforeChoice = chat.uiState.value.messages
+        onMain { assertTrue(chat.requestDialogue(soundTestPrompt())) }
+        tap(stalePicker)
+        assertEquals(beforeChoice, chat.uiState.value.messages)
+        assertEquals(1, audio.effects.count { it == SoundEffect.CLICK })
+        advanceChatTime(scheduler, 0)
+
+        val choice = option(gaming)
+        click(choice)
+        tap(choice) // The still-rendered button now carries an already-consumed prompt ID.
+        assertEquals(beforeChoice.size + 1, chat.uiState.value.messages.size)
+        assertEquals(MessageContent.Text(gaming.textKey), chat.uiState.value.messages.last().content)
+        assertEquals(2, audio.effects.count { it == SoundEffect.CLICK })
+        onMain { motion.scaleFactor = 0f }
+        settle()
+        assertEquals(
+            listOf(SoundEffect.CLICK, SoundEffect.SEND_STAMP, SoundEffect.RECEIVE,
+                SoundEffect.CLICK, SoundEffect.SEND_STAMP),
+            audio.effects
+        )
+        advanceChatTime(scheduler, 1_600)
+        awaitTag("${PICKER_STICKER_TAG_PREFIX}ok")
+        assertEquals(5, audio.effects.size)
+    }
+
+    @Test
+    fun soundDoesNotReplayAfterResumeOrRecreationWithAccumulatedHistory() = withHost {
+        val scheduler = TestCoroutineScheduler()
+        val originalAudio = RecordingSounds(scheduler)
+        val chat = attachSoundChat(scheduler, originalAudio)
+        tap(awaitTag("${PICKER_STICKER_TAG_PREFIX}ok"))
+        settle()
+        assertEquals(listOf(SoundEffect.CLICK), originalAudio.effects)
+
+        scenario.moveToState(Lifecycle.State.CREATED)
+        onMain {
+            scheduler.advanceTimeBy(1_600)
+            scheduler.runCurrent()
+        }
+        assertEquals(MessageSender.AME, chat.uiState.value.messages.last().sender)
+        assertEquals(1, originalAudio.stops)
+        scenario.moveToState(Lifecycle.State.RESUMED)
+        at(500)
+        assertEquals(listOf(SoundEffect.CLICK), originalAudio.effects)
+
+        tap(awaitTag("${PICKER_STICKER_TAG_PREFIX}gomen"))
+        settle()
+        at(700)
+        assertEquals(listOf(SoundEffect.CLICK, SoundEffect.CLICK, SoundEffect.SEND_STAMP), originalAudio.effects)
+        advanceChatTime(scheduler, 1_600)
+        assertEquals(listOf(3_200L), originalAudio.receiveTimes)
+
+        scenario.recreate()
+        val freshAudio = RecordingSounds(scheduler)
+        val restored = attachSoundChat(scheduler, freshAudio)
+        assertTrue(chat === restored)
+        assertEquals(1, originalAudio.releases)
+        advanceChatTime(scheduler, 500)
+        assertEquals(listOf(3_200L), originalAudio.receiveTimes)
+        assertTrue(freshAudio.effects.isEmpty())
+        tap(awaitTag("${PICKER_STICKER_TAG_PREFIX}ok"))
+        settle()
+        at(900)
+        assertEquals(listOf(SoundEffect.CLICK, SoundEffect.SEND_STAMP), freshAudio.effects)
+    }
+
+    private fun attachSoundChat(
+        scheduler: TestCoroutineScheduler,
+        player: RecordingSounds,
+        language: androidx.compose.runtime.State<String> = mutableStateOf("es")
+    ): ChatViewModel {
+        lateinit var chat: ChatViewModel
+        scenario.onActivity { activity ->
+            val dispatcher = StandardTestDispatcher(scheduler)
+            val factory = viewModelFactory {
+                initializer { ChatViewModel(now = { scheduler.currentTime }, dispatcher = dispatcher) }
+            }
+            chat = ViewModelProvider(activity, factory)[ChatViewModel::class.java]
+            val sounds = ChatSoundCoordinator(player)
+            activity.lifecycle.addObserver(object : DefaultLifecycleObserver {
+                override fun onDestroy(owner: LifecycleOwner) { sounds.release() }
+            })
+            activity.setContent {
+                CompositionLocalProvider(LocalChatAnimationSpec provides spec) {
+                    ChatScreen(chat, language = language.value, sounds = sounds)
+                }
+            }
+        }
+        settle(5)
+        return chat
+    }
+
+    private fun advanceChatTime(scheduler: TestCoroutineScheduler, milliseconds: Long) {
+        onMain {
+            scheduler.advanceTimeBy(milliseconds)
+            scheduler.runCurrent()
+        }
+        settle()
+    }
+
+    private fun soundTestPrompt() = DialogueDefinition(
+        "audio-test", "prompt",
+        mapOf(
+            "prompt" to DialogueNode(listOf(DialogueAction.ShowChoices(
+                listOf(DialogueOption(gaming.id, gaming.textKey, "end"))
+            ))),
+            "end" to DialogueNode(listOf(DialogueAction.End))
+        )
+    )
+
+    private class RecordingSounds(private val scheduler: TestCoroutineScheduler) : SoundEffectPlayer {
+        private val calls = mutableListOf<Pair<SoundEffect, Long>>()
+        val effects get() = calls.map { it.first }
+        val receiveTimes get() = calls.filter { it.first == SoundEffect.RECEIVE }.map { it.second }
+        var stops = 0
+            private set
+        var releases = 0
+            private set
+
+        override fun play(effect: SoundEffect, volume: Float): Boolean {
+            check(releases == 0)
+            calls.add(effect to scheduler.currentTime)
+            return true
+        }
+
+        override fun stopAll() { stops++ }
+        override fun release() { releases++ }
     }
 
     @Composable

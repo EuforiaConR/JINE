@@ -1,6 +1,8 @@
 package com.euforia.jine
 
 import com.euforia.jine.ui.components.MessageArrivalTracker
+import com.euforia.jine.ui.components.AppearanceUpdate
+import com.euforia.jine.ui.components.MessageAppearances
 import com.euforia.jine.ui.components.MessageFadeWindow
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -50,6 +52,31 @@ class MessageAppearancesTest {
         assertEquals(1f, first.alphaAt(nanos(200)), 0f)
         assertEquals(0.5f, second.alphaAt(nanos(200)), 0f)
         assertEquals(1f, MessageFadeWindow(nanos(100), 0).alphaAt(nanos(100)), 0f)
+    }
+
+    @Test
+    fun arrivalAndRealFadeCompletionAreReportedOnceEvenIfTheAlphaIsQueriedAgain() {
+        val tracker = MessageAppearances(listOf("initial"))
+        val updated = listOf("initial", "first", "second")
+        assertEquals(AppearanceUpdate(listOf("first", "second")), tracker.observe(updated, nanos(0), nanos(200)))
+        assertTrue(tracker.advance(nanos(199)).isEmpty())
+        assertEquals(setOf("first", "second"), tracker.advance(nanos(200)).toSet())
+        assertFalse(tracker.hasActiveFades)
+        assertEquals(1f, tracker.alpha("first"), 0f)
+        assertEquals(AppearanceUpdate(emptyList()), tracker.observe(updated, nanos(200), nanos(200)))
+        assertTrue(tracker.advance(nanos(300)).isEmpty())
+    }
+
+    @Test
+    fun reducingMotionToZeroFinishesTheActiveFadesAndAnyArrivalsInTheSameUpdate() {
+        val tracker = MessageAppearances(listOf("initial"))
+        assertEquals(AppearanceUpdate(listOf("fading")), tracker.observe(listOf("initial", "fading"), nanos(0), nanos(200)))
+        val result = tracker.observe(listOf("initial", "fading", "instant"), nanos(100), 0)
+        assertEquals(AppearanceUpdate(listOf("instant"), listOf("fading", "instant")), result)
+        assertEquals(1f, tracker.alpha("fading"), 0f)
+        assertEquals(1f, tracker.alpha("instant"), 0f)
+        assertEquals(AppearanceUpdate(emptyList()), tracker.observe(listOf("initial", "fading", "instant"), nanos(100), 0))
+        assertTrue(tracker.advance(nanos(400)).isEmpty())
     }
 
     private fun nanos(milliseconds: Long) = milliseconds * 1_000_000

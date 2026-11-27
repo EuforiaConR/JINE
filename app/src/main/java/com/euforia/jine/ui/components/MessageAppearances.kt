@@ -7,6 +7,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
@@ -40,6 +41,11 @@ internal class MessageFadeWindow(private val startNanos: Long, private val durat
     }
 }
 
+internal data class AppearanceUpdate(
+    val arrivedIds: List<String>,
+    val finishedIds: List<String> = emptyList()
+)
+
 internal class MessageAppearances(initialIds: List<String>) {
     private class ActiveFade(val window: MessageFadeWindow) {
         val alpha = mutableFloatStateOf(0f)
@@ -54,37 +60,52 @@ internal class MessageAppearances(initialIds: List<String>) {
     // A lazy row composed before SideEffect sees zero on its first draw, never an opaque flash.
     fun alpha(id: String): Float = active[id]?.alpha?.floatValue ?: if (arrivals.knows(id)) 1f else 0f
 
-    fun observe(ids: List<String>, nowNanos: Long, durationNanos: Long) {
+    fun observe(ids: List<String>, nowNanos: Long, durationNanos: Long): AppearanceUpdate {
         val newIds = arrivals.register(ids)
         if (durationNanos <= 0L) {
+            val finished = active.keys.toList() + newIds
             active.clear()
-            return
+            return AppearanceUpdate(newIds, finished)
         }
         for (id in newIds) {
             active[id] = ActiveFade(MessageFadeWindow(nowNanos, durationNanos))
         }
+        return AppearanceUpdate(newIds)
     }
 
-    fun advance(nowNanos: Long) {
+    fun advance(nowNanos: Long): List<String> {
         val finished = mutableListOf<String>()
         for ((id, fade) in active) {
             val alpha = fade.window.alphaAt(nowNanos)
             if (alpha >= 1f) finished.add(id) else fade.alpha.floatValue = alpha
         }
         finished.forEach(active::remove)
+        return finished
     }
 }
 
 @Composable
-internal fun rememberMessageAppearances(messages: List<Message>): MessageAppearances? {
+internal fun rememberMessageAppearances(
+    messages: List<Message>,
+    onArrived: ((Message) -> Unit)? = null,
+    onFinished: ((String) -> Unit)? = null
+): MessageAppearances? {
     val ids = remember(messages) { messages.map(Message::id) }
     val appearances = remember { MessageAppearances(ids) }
     val spec = LocalChatAnimationSpec.current
     val scale = rememberCoroutineScope().chatMotionScale()
     val durationNanos = (spec.messageFadeMillis * 1_000_000.0 * scale).toLong()
+    val latestFinished = rememberUpdatedState(onFinished)
 
     SideEffect {
-        appearances.observe(ids, spec.nowNanos(), durationNanos)
+        val update = appearances.observe(ids, spec.nowNanos(), durationNanos)
+        if (onArrived != null && update.arrivedIds.isNotEmpty()) {
+            val newIds = update.arrivedIds.toHashSet()
+            for (message in messages) {
+                if (message.id in newIds) onArrived(message)
+            }
+        }
+        onFinished?.let { update.finishedIds.forEach(it) }
     }
 
     if (durationNanos > 0L) {
@@ -93,7 +114,8 @@ internal fun rememberMessageAppearances(messages: List<Message>): MessageAppeara
                 snapshotFlow { appearances.hasActiveFades }.first { it }
                 while (appearances.hasActiveFades) {
                     // Frames invalidate active layers. Monotonic deadlines also expire offscreen.
-                    withFrameNanos { appearances.advance(spec.nowNanos()) }
+                    val finished = withFrameNanos { appearances.advance(spec.nowNanos()) }
+                    latestFinished.value?.let { finished.forEach(it) }
                 }
             }
         }

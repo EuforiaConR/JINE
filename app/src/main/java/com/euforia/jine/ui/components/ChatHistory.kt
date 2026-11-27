@@ -29,6 +29,7 @@ import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import com.euforia.jine.core.audio.ChatSoundCoordinator
 import com.euforia.jine.core.localization.LocalizationSnapshot
 import com.euforia.jine.data.model.Message
 import com.euforia.jine.data.model.MessageSender
@@ -45,9 +46,14 @@ internal fun ChatHistory(
     stickersById: Map<String, Sticker>,
     state: LazyListState,
     viewport: IntSize,
-    panelHeightPx: Int?
+    panelHeightPx: Int?,
+    sounds: ChatSoundCoordinator? = null
 ) {
-    val appearances = rememberMessageAppearances(messages)
+    val appearances = rememberMessageAppearances(
+        messages,
+        onArrived = sounds?.let { it::onMessageArrived },
+        onFinished = sounds?.let { it::onAppearanceFinished }
+    )
     val density = LocalDensity.current
     val bottomPadding = with(density) { (panelHeightPx ?: 0).toDp() } + 12.dp
     val afterPaddingPx = with(density) { bottomPadding.roundToPx() }
