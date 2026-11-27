@@ -17,6 +17,11 @@ object JineAssets {
         const val TAIL = "textures/dialogue/tail_dialogue.png"
     }
 
+    object Dialogues {
+        const val DIALOGUES_DIRECTORY = "dialogues"
+        const val STREAM_DEMO = "$DIALOGUES_DIRECTORY/demo/stream.json"
+    }
+
     object Backgrounds {
         const val JINE = "textures/backgrounds/jine_bg.png"
     }

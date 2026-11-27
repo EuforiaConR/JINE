@@ -1,12 +1,16 @@
-package com.euforia.jine.data.model.dialogue
+package com.euforia.jine
 
 import com.euforia.jine.data.model.dialogue.DialogueAction.End
 import com.euforia.jine.data.model.dialogue.DialogueAction.Jump
 import com.euforia.jine.data.model.dialogue.DialogueAction.SendText
 import com.euforia.jine.data.model.dialogue.DialogueAction.ShowChoices
 import com.euforia.jine.data.model.dialogue.DialogueAction.Wait
+import com.euforia.jine.data.model.dialogue.DialogueDefinition
+import com.euforia.jine.data.model.dialogue.DialogueNode
+import com.euforia.jine.data.model.dialogue.DialogueOption
 
-internal object DemoDialogues {
+// The definition from phase 1.4.2b, preserved only for migration equivalence tests.
+internal object LegacyStreamFixture {
     private const val STREAM_PREFIX = "dialogue.demo.narrative.stream."
     private const val PAUSE_MS = 700L
 

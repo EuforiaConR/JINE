@@ -42,8 +42,8 @@ import com.euforia.jine.data.model.MessageContent
 import com.euforia.jine.data.model.MessageSender
 import com.euforia.jine.data.model.PCHAN_PACK_ID
 import com.euforia.jine.data.model.Sticker
-import com.euforia.jine.data.model.dialogue.DemoDialogues
 import com.euforia.jine.data.repository.StickerRepository
+import com.euforia.jine.data.repository.DialogueRepository
 import com.euforia.jine.ui.components.CHAT_MESSAGE_TAG_PREFIX
 import com.euforia.jine.ui.components.CHAT_HISTORY_TAG
 import com.euforia.jine.ui.components.CHAT_CHOICE_PANEL_TAG
@@ -79,6 +79,7 @@ import org.junit.runner.RunWith
 import java.util.Locale
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(AndroidJUnit4::class)
@@ -183,9 +184,9 @@ class ChatLocalizationTest {
                 assertTrue(sends.isEmpty())
             }
             awaitInReadingArea("preview_long_message", wholeRow = false)
-            repeat(4) {
+            repeat(6) {
                 if (rowInReadingArea("preview_greeting") == null) {
-                    scrollHistory(AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD)
+                    swipeHistory(towardEnd = false, finishWithoutFling = true)
                 }
             }
             awaitInReadingArea("preview_greeting")
@@ -539,9 +540,48 @@ class ChatLocalizationTest {
     }
 
     @Test
+    fun malformedDebugDialogueLeavesFreeChatAvailableAndRetryDoesNotStartTheDemo() {
+        val scheduler = TestCoroutineScheduler()
+        val factory = controlledChatFactory(scheduler, ChatTimings())
+        val attempts = AtomicInteger()
+        ActivityScenario.launch(ComponentActivity::class.java).use { scenario ->
+            lateinit var chat: ChatViewModel
+            scenario.onActivity { activity ->
+                chat = ViewModelProvider(activity, factory)[ChatViewModel::class.java]
+                activity.setContent {
+                    JineApp(chat, loadDialogue = { appContext ->
+                        if (attempts.incrementAndGet() == 1) {
+                            DialogueRepository.parse("dialogues/tests/invalid.json", """{"schemaVersion":1,}""")
+                        } else {
+                            DialogueRepository.load(appContext, JineAssets.Dialogues.STREAM_DEMO)
+                        }
+                    })
+                }
+            }
+            val retry = awaitNode("Debug · Error al cargar la demo. Reintentar")
+            awaitScrollbarAtPanel(CHAT_PANEL_TAG)
+            assertEquals(previewIds, chat.messageIds())
+            tap(awaitPickerSticker("ok", "De acuerdo"))
+            awaitMessage("De acuerdo", "timed-1")
+            advanceChat(scenario, scheduler, 1_600)
+            awaitMessage("okeeey", "timed-2")
+            val freeState = chat.uiState.value
+            tap(retry)
+            val demo = awaitNode("Debug · Demo narrativa")
+            assertEquals(2, attempts.get())
+            assertEquals(freeState, chat.uiState.value)
+            tap(demo)
+            advanceChat(scenario, scheduler, 0)
+            awaitHiddenPanel()
+            awaitMessage("oye, p-chan!!", "timed-3")
+        }
+    }
+
+    @Test
     fun realNarrativePreservesTheReadingAnchorAndSurvivesRecreationAtTheSecondChoice() {
         val scheduler = TestCoroutineScheduler()
         val factory = controlledChatFactory(scheduler, ChatTimings())
+        val dialogue = DialogueRepository.load(context, JineAssets.Dialogues.STREAM_DEMO)
         val language = mutableStateOf("es")
         val stickerSends = mutableListOf<String>()
         fun showChat(activity: ComponentActivity): ChatViewModel {
@@ -561,24 +601,28 @@ class ChatLocalizationTest {
             awaitPickerSticker("love", "Que viva el amor")
             awaitScrollbarAtPanel(CHAT_PANEL_TAG)
             awaitInReadingArea(freeHistory.last().id)
-            swipeHistory(towardEnd = false)
+            swipeHistory(towardEnd = false, finishWithoutFling = true)
             awaitValue("older rows before starting the demo") {
                 Unit.takeIf { rowInReadingArea(freeHistory.last().id) == null }
             }
-            val (anchor, position) = firstReadableRow()
+            val readingTop = scrollbarBounds().top
+            val (anchor, anchorTop) = visibleMessageIds().firstNotNullOf { id ->
+                // A partially clipped accessibility node can report a different height after re-layout.
+                rowInReadingArea(id)?.takeIf { it.top > readingTop }?.let { id to it.top }
+            }
 
             scenario.onActivity {
-                assertTrue(chat.requestDialogue(DemoDialogues.stream))
+                assertTrue(chat.requestDialogue(dialogue))
                 scheduler.runCurrent()
             }
             awaitHiddenPanel()
-            assertEquals(position, awaitInReadingArea(anchor))
+            assertEquals(anchorTop, awaitInReadingArea(anchor).top)
             assertEquals(listOf("intro.01"), chat.narrativeKeys())
             advanceChat(scenario, scheduler, 1_400)
             val first = DialogueChoice("gaming", "dialogue.demo.narrative.stream.choice.gaming")
             val firstButton = awaitChoice(first, "¡De videojuegos!")
             awaitScrollbarAtPanel(CHAT_CHOICE_PANEL_TAG)
-            assertEquals(position, awaitInReadingArea(anchor))
+            assertEquals(anchorTop, awaitInReadingArea(anchor).top)
             assertEquals(listOf("intro.01", "intro.02", "question.01"), chat.narrativeKeys())
             assertNull(rowInReadingArea(chat.messageIds().last()))
 
@@ -1152,12 +1196,6 @@ class ChatLocalizationTest {
         rowInReadingArea(id)?.let { id to it }
     }
 
-    private fun scrollHistory(action: Int) {
-        assertTrue(awaitTag(CHAT_HISTORY_TAG).performAction(action))
-        instrumentation.uiAutomation.waitForIdle(250, 5_000)
-        refreshAccessibility()
-    }
-
     private fun scrollHistoryToBoundary(action: Int, boundaryMessageId: String) {
         val forward = action == AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
         val area = scrollbarBounds()
@@ -1182,12 +1220,17 @@ class ChatLocalizationTest {
         )
     }
 
-    private fun swipeHistory(towardEnd: Boolean) {
+    private fun swipeHistory(towardEnd: Boolean, finishWithoutFling: Boolean = false) {
         val area = scrollbarBounds()
         val history = boundsOf(awaitTag(CHAT_HISTORY_TAG))
         val start = area.top + area.height() / 8
         val end = area.bottom - area.height() / 8
-        swipe(history.centerX(), if (towardEnd) end else start, if (towardEnd) start else end)
+        swipe(
+            history.centerX(),
+            if (towardEnd) end else start,
+            if (towardEnd) start else end,
+            finishWithoutFling = finishWithoutFling
+        )
     }
 
     private fun thumbRows(scenario: ActivityScenario<ComponentActivity>, track: Rect): IntRange {
@@ -1297,7 +1340,7 @@ class ChatLocalizationTest {
         }
     }
 
-    private fun swipe(x: Int, startY: Int, endY: Int, stepMillis: Long = 16) {
+    private fun swipe(x: Int, startY: Int, endY: Int, stepMillis: Long = 16, finishWithoutFling: Boolean = false) {
         val start = SystemClock.uptimeMillis()
         for (step in 0..10) {
             val action = when (step) {
@@ -1306,6 +1349,12 @@ class ChatLocalizationTest {
                 else -> MotionEvent.ACTION_MOVE
             }
             val y = startY + (endY - startY) * step / 10f
+            if (step == 10 && finishWithoutFling) {
+                repeat(4) {
+                    sendPointer(start, MotionEvent.ACTION_MOVE, x.toFloat(), y)
+                    SystemClock.sleep(40)
+                }
+            }
             sendPointer(start, action, x.toFloat(), y)
             if (step < 10) SystemClock.sleep(stepMillis)
         }

@@ -10,9 +10,9 @@ import com.euforia.jine.data.model.Message
 import com.euforia.jine.data.model.MessageContent
 import com.euforia.jine.data.model.MessageSender
 import com.euforia.jine.data.model.PCHAN_PACK_ID
-import com.euforia.jine.data.model.dialogue.DemoDialogues
 import com.euforia.jine.data.model.dialogue.DialogueAction
 import com.euforia.jine.data.repository.StickerCatalogException
+import com.euforia.jine.data.repository.DialogueRepository
 import com.euforia.jine.data.repository.StickerRepository
 import com.euforia.jine.ui.screens.GENERIC_DEMO_REPLY
 import com.euforia.jine.ui.screens.StickerBatch
@@ -88,7 +88,8 @@ class LocalizationAndStickerDataTest {
     @Test
     fun narrativeDemoActionsAndChoicesHaveTranslationsInBothAssetCatalogs() {
         val prefix = "dialogue.demo.narrative.stream."
-        val keys = DemoDialogues.stream.nodes.values.flatMap { node ->
+        val stream = DialogueRepository.load(context, JineAssets.Dialogues.STREAM_DEMO)
+        val keys = stream.nodes.values.flatMap { node ->
             node.actions.flatMap { action ->
                 when (action) {
                     is DialogueAction.SendText -> listOf(action.textKey)

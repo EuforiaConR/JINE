@@ -1,6 +1,5 @@
 package com.euforia.jine
 
-import com.euforia.jine.data.model.dialogue.DemoDialogues
 import com.euforia.jine.data.model.dialogue.DialogueAction
 import com.euforia.jine.data.model.dialogue.DialogueAction.End
 import com.euforia.jine.data.model.dialogue.DialogueAction.SendText
@@ -25,32 +24,6 @@ import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class DialogueEngineTest {
-    @Test
-    fun everyDemoCombinationEmitsOnlyItsTwoBranchesAndTheSharedTextsInOrder() = runTest {
-        for (first in listOf("gaming", "talking")) {
-            for (second in listOf("help", "later")) {
-                val choices = ArrayDeque(listOf(first, second))
-                val texts = mutableListOf<Pair<String, Long>>()
-                val start = testScheduler.currentTime
-                DialogueEngine.execute(
-                    DemoDialogues.stream,
-                    sendText = { texts.add(it.substringAfter("stream.") to (testScheduler.currentTime - start)) },
-                    awaitChoice = { options ->
-                        val expected = if (choices.size == 2) listOf("gaming", "talking") else listOf("help", "later")
-                        assertEquals(expected, options.map { it.id })
-                        choices.removeFirst()
-                    }
-                )
-                assertEquals(
-                    listOf("intro.01", "intro.02", "question.01", "$first.01", "question.02", "$second.01", "outro.01"),
-                    texts.map { it.first }
-                )
-                assertEquals(listOf(0L, 700L, 1_400L, 1_400L, 2_100L, 2_100L, 2_800L), texts.map { it.second })
-                assertTrue(choices.isEmpty())
-            }
-        }
-    }
-
     @Test
     fun noChoicesAndZeroWaitsNeedNoImplicitDelays() = runTest {
         val emitted = mutableListOf<Pair<String, Long>>()

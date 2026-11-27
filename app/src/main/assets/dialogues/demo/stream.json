@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "id": "stream",
+  "entry": "intro",
+  "nodes": {
+    "intro": [
+      { "type": "text", "key": "dialogue.demo.narrative.stream.intro.01" },
+      { "type": "wait", "durationMs": 700 },
+      { "type": "text", "key": "dialogue.demo.narrative.stream.intro.02" },
+      { "type": "wait", "durationMs": 700 },
+      { "type": "text", "key": "dialogue.demo.narrative.stream.question.01" },
+      {
+        "type": "choices",
+        "options": [
+          { "id": "gaming", "key": "dialogue.demo.narrative.stream.choice.gaming", "next": "gaming_reply" },
+          { "id": "talking", "key": "dialogue.demo.narrative.stream.choice.talking", "next": "talking_reply" }
+        ]
+      }
+    ],
+    "gaming_reply": [
+      { "type": "text", "key": "dialogue.demo.narrative.stream.gaming.01" },
+      { "type": "wait", "durationMs": 700 },
+      { "type": "jump", "next": "common_question" }
+    ],
+    "talking_reply": [
+      { "type": "text", "key": "dialogue.demo.narrative.stream.talking.01" },
+      { "type": "wait", "durationMs": 700 },
+      { "type": "jump", "next": "common_question" }
+    ],
+    "common_question": [
+      { "type": "text", "key": "dialogue.demo.narrative.stream.question.02" },
+      {
+        "type": "choices",
+        "options": [
+          { "id": "help", "key": "dialogue.demo.narrative.stream.choice.help", "next": "help_reply" },
+          { "id": "later", "key": "dialogue.demo.narrative.stream.choice.later", "next": "later_reply" }
+        ]
+      }
+    ],
+    "help_reply": [
+      { "type": "text", "key": "dialogue.demo.narrative.stream.help.01" },
+      { "type": "wait", "durationMs": 700 },
+      { "type": "jump", "next": "outro" }
+    ],
+    "later_reply": [
+      { "type": "text", "key": "dialogue.demo.narrative.stream.later.01" },
+      { "type": "wait", "durationMs": 700 },
+      { "type": "jump", "next": "outro" }
+    ],
+    "outro": [
+      { "type": "text", "key": "dialogue.demo.narrative.stream.outro.01" },
+      { "type": "end" }
+    ]
+  }
+}
