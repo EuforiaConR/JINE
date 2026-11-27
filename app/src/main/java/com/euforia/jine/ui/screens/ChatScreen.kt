@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
@@ -50,6 +51,8 @@ import com.euforia.jine.ui.components.JineWindow
 import com.euforia.jine.ui.components.PixelTiledImage
 import com.euforia.jine.ui.components.StickerPanelStatus
 import com.euforia.jine.ui.components.StickerPicker
+import com.euforia.jine.ui.theme.ChatAnimationSpec
+import com.euforia.jine.ui.theme.LocalChatAnimationSpec
 
 internal const val CHAT_PANEL_TAG = "chat-sticker-panel"
 
@@ -75,17 +78,19 @@ internal fun ChatScreen(
     val stickers = rememberStickerCatalog()
     val validStickerIds = remember(stickers) { stickers.orEmpty().map { it.id }.toSet() }
 
-    ChatContent(
-        uiState,
-        language,
-        stickers,
-        onStickerPressed = { sticker ->
-            if (viewModel.sendSticker(sticker.id, validStickerIds)) onStickerSent(sticker)
-        },
-        onChoicePressed = { promptId, choiceId ->
-            viewModel.chooseDialogueOption(promptId, choiceId)
-        }
-    )
+    key(viewModel) {
+        ChatContent(
+            uiState,
+            language,
+            stickers,
+            onStickerPressed = { sticker ->
+                if (viewModel.sendSticker(sticker.id, validStickerIds)) onStickerSent(sticker)
+            },
+            onChoicePressed = { promptId, choiceId ->
+                viewModel.chooseDialogueOption(promptId, choiceId)
+            }
+        )
+    }
 }
 
 @Composable
@@ -267,11 +272,13 @@ private fun ChoicesPreview(language: String, choices: List<DialogueChoice>) {
         Message("preview_narrative_intro", MessageSender.AME, MessageContent.Text("dialogue.preview.narrative.intro"), 1L),
         Message("preview_narrative_question", MessageSender.AME, MessageContent.Text("dialogue.preview.narrative.question"), 2L)
     )
-    ChatContent(
-        ChatUiState(messages, inputMode = ChatInputMode.Choices("preview-stream", choices)),
-        language,
-        rememberStickerCatalog()
-    )
+    CompositionLocalProvider(LocalChatAnimationSpec provides ChatAnimationSpec.Static) {
+        ChatContent(
+            ChatUiState(messages, inputMode = ChatInputMode.Choices("preview-stream", choices)),
+            language,
+            rememberStickerCatalog()
+        )
+    }
 }
 
 @Preview(

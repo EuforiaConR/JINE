@@ -16,6 +16,7 @@ import com.euforia.jine.R
 import com.euforia.jine.core.assets.JineAssets
 import com.euforia.jine.core.localization.localizedStringResource
 import com.euforia.jine.ui.theme.JineBubble
+import com.euforia.jine.ui.theme.JineChatBackground
 import com.euforia.jine.ui.theme.JineSentBubble
 import com.euforia.jine.ui.theme.JineText
 import com.euforia.jine.ui.theme.ZpixFont
@@ -27,7 +28,8 @@ private const val DIALOGUE_SCALE = 1f
 fun MessageBubble(
     message: String,
     modifier: Modifier = Modifier,
-    bubbleColor: Color = JineBubble
+    bubbleColor: Color = JineBubble,
+    backgroundAlpha: (() -> Float)? = null
 ) {
     Box(
         modifier = modifier.widthIn(max = 280.dp),
@@ -37,7 +39,9 @@ fun MessageBubble(
         NineSliceImage(
             path = JineAssets.Dialogue.BALLOON,
             slices = NineSliceInsets(7),
-            modifier = Modifier.matchParentSize(),
+            modifier = Modifier.matchParentSize().then(
+                if (backgroundAlpha == null) Modifier else Modifier.graphicsLayer { alpha = backgroundAlpha() }
+            ),
             scale = DIALOGUE_SCALE,
             tint = bubbleColor
         )
@@ -122,6 +126,23 @@ internal fun SentMessage(message: String, isRead: Boolean) {
             )
         }
         if (isRead) MessageReadReceipt()
+    }
+}
+
+@Preview(name = "Aparición y fondo de opción · 50 %", showBackground = true, widthDp = 360)
+@Composable
+private fun ChatOpacityPreview() {
+    Column(
+        Modifier.fillMaxWidth().background(JineChatBackground).padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        ReceivedMessage("Oye, P-chan…", Modifier.graphicsLayer { alpha = 0.5f })
+        MessageBubble(
+            message = "¡Un directo de videojuegos!",
+            modifier = Modifier.align(Alignment.End).defaultMinSize(minHeight = 48.dp),
+            bubbleColor = JineSentBubble,
+            backgroundAlpha = { 0.5f }
+        )
     }
 }
 

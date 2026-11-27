@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
@@ -63,7 +64,9 @@ import com.euforia.jine.ui.screens.ChatViewModel
 import com.euforia.jine.ui.screens.CommunicationState
 import com.euforia.jine.ui.screens.DialogueChoice
 import com.euforia.jine.ui.screens.initialMessages
+import com.euforia.jine.ui.theme.ChatAnimationSpec
 import com.euforia.jine.ui.theme.JineChatBackground
+import com.euforia.jine.ui.theme.LocalChatAnimationSpec
 import com.euforia.jine.ui.theme.JineSentBubble
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -113,7 +116,7 @@ class ChatLocalizationTest {
 
         ActivityScenario.launch(ComponentActivity::class.java).use { scenario ->
             scenario.onActivity { activity ->
-                activity.setContent {
+                activity.setStaticChatContent {
                     CompositionLocalProvider(
                         LocalContext provides englishContext,
                         LocalConfiguration provides englishConfig
@@ -170,7 +173,7 @@ class ChatLocalizationTest {
             lateinit var chat: ChatViewModel
             scenario.onActivity { activity ->
                 chat = ViewModelProvider(activity, factory)[ChatViewModel::class.java]
-                activity.setContent {
+                activity.setStaticChatContent {
                     Box(Modifier.size(width = 320.dp, height = 260.dp)) {
                         ChatScreen(chat, onStickerSent = { sends.add(it.id) })
                     }
@@ -221,7 +224,7 @@ class ChatLocalizationTest {
             lateinit var chat: ChatViewModel
             scenario.onActivity { activity ->
                 chat = ViewModelProvider(activity, factory)[ChatViewModel::class.java]
-                activity.setContent {
+                activity.setStaticChatContent {
                     ChatScreen(chat, language = language.value, onStickerSent = { sends.add(it.id) })
                 }
             }
@@ -280,7 +283,7 @@ class ChatLocalizationTest {
         val sends = mutableListOf<String>()
         fun showChat(activity: ComponentActivity): ChatViewModel {
             val chat = ViewModelProvider(activity, factory)[ChatViewModel::class.java]
-            activity.setContent {
+            activity.setStaticChatContent {
                 ChatScreen(chat, language = language.value, onStickerSent = { sends.add(it.id) })
             }
             return chat
@@ -363,7 +366,7 @@ class ChatLocalizationTest {
         val sends = mutableListOf<String>()
         fun showChat(activity: ComponentActivity): ChatViewModel {
             val chat = ViewModelProvider(activity, factory)[ChatViewModel::class.java]
-            activity.setContent { ChatScreen(chat, language.value) { sends.add(it.id) } }
+            activity.setStaticChatContent { ChatScreen(chat, language.value) { sends.add(it.id) } }
             return chat
         }
 
@@ -465,7 +468,7 @@ class ChatLocalizationTest {
         val displayedHistory = mutableStateOf(history)
         ActivityScenario.launch(ComponentActivity::class.java).use { scenario ->
             scenario.onActivity { activity ->
-                activity.setContent { ChatContent(ChatUiState(displayedHistory.value), "es", stickers) }
+                activity.setStaticChatContent { ChatContent(ChatUiState(displayedHistory.value), "es", stickers) }
             }
             awaitInReadingArea(history.last().id)
             val track = scrollbarBounds()
@@ -504,7 +507,7 @@ class ChatLocalizationTest {
         val history = List(12) { index -> base[index % 2].copy(id = "compact-$index") }
         ActivityScenario.launch(ComponentActivity::class.java).use { scenario ->
             scenario.onActivity { activity ->
-                activity.setContent {
+                activity.setStaticChatContent {
                     Box(Modifier.size(320.dp, height.value)) {
                         ChatContent(ChatUiState(history), "es", catalog.value)
                     }
@@ -548,7 +551,7 @@ class ChatLocalizationTest {
             lateinit var chat: ChatViewModel
             scenario.onActivity { activity ->
                 chat = ViewModelProvider(activity, factory)[ChatViewModel::class.java]
-                activity.setContent {
+                activity.setStaticChatContent {
                     JineApp(chat, loadDialogue = { appContext ->
                         if (attempts.incrementAndGet() == 1) {
                             DialogueRepository.parse("dialogues/tests/invalid.json", """{"schemaVersion":1,}""")
@@ -586,7 +589,7 @@ class ChatLocalizationTest {
         val stickerSends = mutableListOf<String>()
         fun showChat(activity: ComponentActivity): ChatViewModel {
             val chat = ViewModelProvider(activity, factory)[ChatViewModel::class.java]
-            activity.setContent { ChatScreen(chat, language = language.value, onStickerSent = { stickerSends.add(it.id) }) }
+            activity.setStaticChatContent { ChatScreen(chat, language = language.value, onStickerSent = { stickerSends.add(it.id) }) }
             return chat
         }
 
@@ -699,7 +702,7 @@ class ChatLocalizationTest {
         val options = listOf(gaming, talking)
         ActivityScenario.launch(ComponentActivity::class.java).use { scenario ->
             scenario.onActivity { activity ->
-                activity.setContent {
+                activity.setStaticChatContent {
                     ChatContent(
                         uiState = state.value,
                         language = language.value,
@@ -781,7 +784,7 @@ class ChatLocalizationTest {
         val stickers = StickerRepository.load(context)
         ActivityScenario.launch(ComponentActivity::class.java).use { scenario ->
             scenario.onActivity { activity ->
-                activity.setContent { ChatContent(state.value, "es", stickers) }
+                activity.setStaticChatContent { ChatContent(state.value, "es", stickers) }
             }
             awaitInReadingArea(history.last().id)
             val panel = awaitScrollbarAtPanel(CHAT_CHOICE_PANEL_TAG)
@@ -832,7 +835,7 @@ class ChatLocalizationTest {
         val height = mutableStateOf(260.dp)
         val events = mutableListOf<Pair<String, String>>()
         fun showChat(activity: ComponentActivity) {
-            activity.setContent {
+            activity.setStaticChatContent {
                 Box(Modifier.size(320.dp, height.value)) {
                     ChatContent(
                         state.value, "es", catalog.value,
@@ -920,7 +923,7 @@ class ChatLocalizationTest {
         val long = sentChoice("pchan_long", longChoice)
         ActivityScenario.launch(ComponentActivity::class.java).use { scenario ->
             scenario.onActivity { activity ->
-                activity.setContent {
+                activity.setStaticChatContent {
                     val localization = rememberLocalization(language.value)
                     ProvideLocalizedResources(localization.language) {
                         Column(Modifier.fillMaxWidth().background(JineChatBackground)) {
@@ -980,7 +983,7 @@ class ChatLocalizationTest {
         val sends = mutableListOf<Sticker>()
         ActivityScenario.launch(ComponentActivity::class.java).use { scenario ->
             scenario.onActivity { activity ->
-                activity.setContent {
+                activity.setStaticChatContent {
                     Box(Modifier.safeDrawingPadding().background(JineChatBackground)) {
                         StickerPicker(
                             stickers = stickers,
@@ -1021,7 +1024,7 @@ class ChatLocalizationTest {
         val sends = mutableListOf<Sticker>()
         ActivityScenario.launch(ComponentActivity::class.java).use { scenario ->
             scenario.onActivity { activity ->
-                activity.setContent {
+                activity.setStaticChatContent {
                     Box(Modifier.safeDrawingPadding()) {
                         ProvideLocalizedResources("en") {
                             StickerPicker(
@@ -1048,7 +1051,7 @@ class ChatLocalizationTest {
         val sends = mutableListOf<Sticker>()
         ActivityScenario.launch(ComponentActivity::class.java).use { scenario ->
             scenario.onActivity { activity ->
-                activity.setContent {
+                activity.setStaticChatContent {
                     Box(Modifier.safeDrawingPadding()) {
                         ProvideLocalizedResources("en") {
                             StickerPicker(emptyList(), sends::add, { it.descriptionKey })
@@ -1060,6 +1063,12 @@ class ChatLocalizationTest {
             assertFalse(status.isClickable)
             tap(status)
             scenario.onActivity { assertTrue(sends.isEmpty()) }
+        }
+    }
+
+    private fun ComponentActivity.setStaticChatContent(content: @Composable () -> Unit) {
+        setContent {
+            CompositionLocalProvider(LocalChatAnimationSpec provides ChatAnimationSpec.Static, content = content)
         }
     }
 

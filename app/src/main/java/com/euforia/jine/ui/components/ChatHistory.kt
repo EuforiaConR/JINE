@@ -47,6 +47,7 @@ internal fun ChatHistory(
     viewport: IntSize,
     panelHeightPx: Int?
 ) {
+    val appearances = rememberMessageAppearances(messages)
     val density = LocalDensity.current
     val bottomPadding = with(density) { (panelHeightPx ?: 0).toDp() } + 12.dp
     val afterPaddingPx = with(density) { bottomPadding.roundToPx() }
@@ -112,7 +113,12 @@ internal fun ChatHistory(
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         items(messages, key = { it.id }) { message ->
-            ChatMessageItem(message, localization, stickersById)
+            val modifier = if (appearances != null && appearances.needsLayer(message.id)) {
+                Modifier.messageAppearance { appearances.alpha(message.id) }
+            } else {
+                Modifier
+            }
+            ChatMessageItem(message, localization, stickersById, modifier)
         }
     }
 }

@@ -45,14 +45,15 @@ private val sentStickerSize = 72.dp
 internal fun ChatMessageItem(
     message: Message,
     localization: LocalizationSnapshot,
-    stickersById: Map<String, Sticker>
+    stickersById: Map<String, Sticker>,
+    modifier: Modifier = Modifier
 ) {
     val alignment = when (message.sender) {
         MessageSender.AME -> Alignment.TopStart
         MessageSender.PCHAN -> Alignment.TopEnd
     }
     Box(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .semantics(mergeDescendants = true) {
                 testTagsAsResourceId = true
