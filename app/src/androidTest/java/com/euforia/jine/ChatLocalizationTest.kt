@@ -27,6 +27,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import androidx.test.core.app.ActivityScenario
@@ -41,6 +42,7 @@ import com.euforia.jine.data.model.MessageContent
 import com.euforia.jine.data.model.MessageSender
 import com.euforia.jine.data.model.PCHAN_PACK_ID
 import com.euforia.jine.data.model.Sticker
+import com.euforia.jine.data.model.dialogue.DemoDialogues
 import com.euforia.jine.data.repository.StickerRepository
 import com.euforia.jine.ui.components.CHAT_MESSAGE_TAG_PREFIX
 import com.euforia.jine.ui.components.CHAT_HISTORY_TAG
@@ -537,6 +539,113 @@ class ChatLocalizationTest {
     }
 
     @Test
+    fun realNarrativePreservesTheReadingAnchorAndSurvivesRecreationAtTheSecondChoice() {
+        val scheduler = TestCoroutineScheduler()
+        val factory = controlledChatFactory(scheduler, ChatTimings())
+        val language = mutableStateOf("es")
+        val stickerSends = mutableListOf<String>()
+        fun showChat(activity: ComponentActivity): ChatViewModel {
+            val chat = ViewModelProvider(activity, factory)[ChatViewModel::class.java]
+            activity.setContent { ChatScreen(chat, language = language.value, onStickerSent = { stickerSends.add(it.id) }) }
+            return chat
+        }
+
+        ActivityScenario.launch(ComponentActivity::class.java).use { scenario ->
+            lateinit var chat: ChatViewModel
+            scenario.onActivity {
+                chat = showChat(it)
+                repeat(18) { assertTrue(chat.sendSticker("love", setOf("love"))) }
+                scheduler.advanceUntilIdle()
+            }
+            val freeHistory = chat.uiState.value.messages
+            awaitPickerSticker("love", "Que viva el amor")
+            awaitScrollbarAtPanel(CHAT_PANEL_TAG)
+            awaitInReadingArea(freeHistory.last().id)
+            swipeHistory(towardEnd = false)
+            awaitValue("older rows before starting the demo") {
+                Unit.takeIf { rowInReadingArea(freeHistory.last().id) == null }
+            }
+            val (anchor, position) = firstReadableRow()
+
+            scenario.onActivity {
+                assertTrue(chat.requestDialogue(DemoDialogues.stream))
+                scheduler.runCurrent()
+            }
+            awaitHiddenPanel()
+            assertEquals(position, awaitInReadingArea(anchor))
+            assertEquals(listOf("intro.01"), chat.narrativeKeys())
+            advanceChat(scenario, scheduler, 1_400)
+            val first = DialogueChoice("gaming", "dialogue.demo.narrative.stream.choice.gaming")
+            val firstButton = awaitChoice(first, "¡De videojuegos!")
+            awaitScrollbarAtPanel(CHAT_CHOICE_PANEL_TAG)
+            assertEquals(position, awaitInReadingArea(anchor))
+            assertEquals(listOf("intro.01", "intro.02", "question.01"), chat.narrativeKeys())
+            assertNull(rowInReadingArea(chat.messageIds().last()))
+
+            tap(firstButton)
+            awaitHiddenPanel()
+            val firstReply = chat.uiState.value.messages.last()
+            assertEquals(MessageSender.PCHAN, firstReply.sender)
+            assertEquals(MessageContent.Text(first.textKey), firstReply.content)
+            awaitMessage("¡De videojuegos!", firstReply.id)
+            awaitInReadingArea(firstReply.id)
+            assertNull(rowInReadingArea(anchor))
+            assertNull(findNodeInTag("$CHAT_MESSAGE_TAG_PREFIX${firstReply.id}") { it.text?.toString() == "Leído" })
+            advanceChat(scenario, scheduler, 650)
+            awaitMessage("Leído", firstReply.id)
+            advanceChat(scenario, scheduler, 1_650)
+            val later = DialogueChoice("later", "dialogue.demo.narrative.stream.choice.later")
+            awaitChoice(later, "Podemos verlo luego")
+            val beforeRecreation = chat.uiState.value
+            val promptId = (beforeRecreation.inputMode as ChatInputMode.Choices).promptId
+            assertEquals(listOf("intro.01", "intro.02", "question.01", "choice.gaming", "gaming.01", "question.02"), chat.narrativeKeys())
+            scenario.moveToState(Lifecycle.State.CREATED)
+            advanceChat(scenario, scheduler, 30_000)
+            assertEquals(beforeRecreation, chat.uiState.value)
+            scenario.moveToState(Lifecycle.State.RESUMED)
+            scenario.recreate()
+            scenario.onActivity {
+                assertSame(chat, showChat(it))
+                language.value = "en"
+            }
+            val laterButton = awaitChoice(later, "We can plan it later")
+            awaitScrollbarAtPanel(CHAT_CHOICE_PANEL_TAG)
+            awaitMessage("A gaming stream!", firstReply.id)
+            awaitMessage("Read", firstReply.id)
+            assertEquals(beforeRecreation, chat.uiState.value)
+            assertEquals(promptId, (chat.uiState.value.inputMode as ChatInputMode.Choices).promptId)
+            assertTrue(laterButton.performAction(AccessibilityNodeInfo.ACTION_CLICK))
+            awaitHiddenPanel()
+            val secondReply = chat.uiState.value.messages.last()
+            awaitMessage("We can plan it later", secondReply.id)
+            advanceChat(scenario, scheduler, 650)
+            awaitMessage("Read", secondReply.id)
+            advanceChat(scenario, scheduler, 1_650)
+            val outro = chat.uiState.value.messages.last()
+            awaitMessage("anyway, i'll tell you how it goes!", outro.id)
+            awaitInReadingArea(outro.id)
+            awaitScrollbarAtPanel(CHAT_PANEL_TAG)
+            val ok = awaitPickerSticker("ok", "Okay")
+            tap(ok)
+            tap(ok)
+            val outgoing = chat.uiState.value.messages.takeLast(2)
+            assertTrue(outgoing.all { it.content == MessageContent.Sticker(PCHAN_PACK_ID, "ok") })
+            assertEquals(2, outgoing.map { it.id }.distinct().size)
+            advanceChat(scenario, scheduler, 1_600)
+            awaitMessage("hahaha i get it!!", chat.messageIds().last())
+            val sentIds = outgoing.map { it.id }.toSet()
+            assertEquals(sentIds, chat.uiState.value.messages.filter { it.id in sentIds && it.isRead }.map { it.id }.toSet())
+            assertEquals(freeHistory, chat.uiState.value.messages.take(freeHistory.size))
+            assertEquals(
+                listOf("intro.01", "intro.02", "question.01", "choice.gaming", "gaming.01", "question.02",
+                    "choice.later", "later.01", "outro.01"),
+                chat.narrativeKeys()
+            )
+            scenario.onActivity { assertEquals(listOf("ok", "ok"), stickerSends) }
+        }
+    }
+
+    @Test
     fun panelModesKeepTheLatestRowVisibleAndDeliverOnlyExplicitChoices() {
         val history = narrativeHistory()
         val state = mutableStateOf(ChatUiState(history))
@@ -910,12 +1019,15 @@ class ChatLocalizationTest {
         }
     }
 
-    private fun controlledChatFactory(scheduler: TestCoroutineScheduler): ViewModelProvider.Factory {
+    private fun controlledChatFactory(
+        scheduler: TestCoroutineScheduler,
+        timings: ChatTimings = ChatTimings(readMs = 800, replyPreparationMs = 600, replyIntervalMs = 500)
+    ): ViewModelProvider.Factory {
         var nextId = 0
         return viewModelFactory {
             initializer {
                 ChatViewModel(
-                    timings = ChatTimings(readMs = 800, replyPreparationMs = 600, replyIntervalMs = 500),
+                    timings = timings,
                     now = { 1_700_000_000_000L + scheduler.currentTime },
                     newMessageId = { "timed-${++nextId}" },
                     dispatcher = StandardTestDispatcher(scheduler)
@@ -1001,6 +1113,13 @@ class ChatLocalizationTest {
     }
 
     private fun ChatViewModel.messageIds() = uiState.value.messages.map { it.id }
+
+    private fun ChatViewModel.narrativeKeys(): List<String> {
+        val prefix = "dialogue.demo.narrative.stream."
+        return uiState.value.messages.mapNotNull { message ->
+            (message.content as? MessageContent.Text)?.textKey?.takeIf { it.startsWith(prefix) }?.removePrefix(prefix)
+        }
+    }
 
     private fun awaitTag(tag: String): AccessibilityNodeInfo = awaitValue(tag) {
         findVisibleNode { it.viewIdResourceName == tag }

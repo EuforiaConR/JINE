@@ -10,6 +10,8 @@ import com.euforia.jine.data.model.Message
 import com.euforia.jine.data.model.MessageContent
 import com.euforia.jine.data.model.MessageSender
 import com.euforia.jine.data.model.PCHAN_PACK_ID
+import com.euforia.jine.data.model.dialogue.DemoDialogues
+import com.euforia.jine.data.model.dialogue.DialogueAction
 import com.euforia.jine.data.repository.StickerCatalogException
 import com.euforia.jine.data.repository.StickerRepository
 import com.euforia.jine.ui.screens.GENERIC_DEMO_REPLY
@@ -80,6 +82,26 @@ class LocalizationAndStickerDataTest {
             for (key in keys) {
                 assertTrue("Missing translation for $key in $path", (catalog.opt(key) as? String)?.isNotBlank() == true)
             }
+        }
+    }
+
+    @Test
+    fun narrativeDemoActionsAndChoicesHaveTranslationsInBothAssetCatalogs() {
+        val prefix = "dialogue.demo.narrative.stream."
+        val keys = DemoDialogues.stream.nodes.values.flatMap { node ->
+            node.actions.flatMap { action ->
+                when (action) {
+                    is DialogueAction.SendText -> listOf(action.textKey)
+                    is DialogueAction.ShowChoices -> action.options.map { it.textKey }
+                    else -> emptyList()
+                }
+            }
+        }.toSet()
+        assertEquals(13, keys.size)
+        for (path in listOf(JineAssets.Languages.SPANISH, JineAssets.Languages.ENGLISH)) {
+            val catalog = JSONObject(JineAssetManager.getText(context, path))
+            assertEquals(keys, catalog.keys().asSequence().filter { it.startsWith(prefix) }.toSet())
+            assertTrue(keys.all { catalog.getString(it).isNotBlank() })
         }
     }
 

@@ -81,6 +81,9 @@ internal fun ChatScreen(
         stickers,
         onStickerPressed = { sticker ->
             if (viewModel.sendSticker(sticker.id, validStickerIds)) onStickerSent(sticker)
+        },
+        onChoicePressed = { promptId, choiceId ->
+            viewModel.chooseDialogueOption(promptId, choiceId)
         }
     )
 }

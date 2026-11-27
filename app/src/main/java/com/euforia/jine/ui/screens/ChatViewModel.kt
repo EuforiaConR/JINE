@@ -6,6 +6,10 @@ import androidx.lifecycle.viewModelScope
 import com.euforia.jine.data.model.Message
 import com.euforia.jine.data.model.MessageContent
 import com.euforia.jine.data.model.MessageSender
+import com.euforia.jine.data.model.dialogue.DialogueDefinition
+import com.euforia.jine.data.model.dialogue.DialogueOption
+import com.euforia.jine.domain.dialogue.DialogueEngine
+import com.euforia.jine.domain.dialogue.DialogueExecutionException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineStart
@@ -46,6 +50,17 @@ internal class ChatViewModel(
 ) : ViewModel() {
     private class PendingSend(var message: Message, val reading: Job)
 
+    private class NarrativeSession(val definition: DialogueDefinition) {
+        var job: Job? = null
+        var prompt: PendingPrompt? = null
+    }
+
+    private class PendingPrompt(val id: String, val options: List<DialogueOption>) {
+        val answer = CompletableDeferred<DialogueAnswer>()
+    }
+
+    private data class DialogueAnswer(val choiceId: String, val messageId: String)
+
     private val _uiState = MutableStateFlow(ChatUiState(messages = initialMessages(now())))
     val uiState = _uiState.asStateFlow()
 
@@ -53,6 +68,8 @@ internal class ChatViewModel(
     private val pendingSends = linkedMapOf<String, PendingSend>()
     private var reactionCoordinator: Job? = null
     private var preparationInvalidated: CompletableDeferred<Unit>? = null
+    private var narrativeSession: NarrativeSession? = null
+    private var nextPromptNumber = 0L
 
     @MainThread
     fun sendSticker(stickerId: String, validStickerIds: Set<String>): Boolean {
@@ -64,7 +81,7 @@ internal class ChatViewModel(
         val reading = viewModelScope.launch(dispatcher, start = CoroutineStart.LAZY) {
             delay(timings.readMs)
             ensureActive()
-            markRead(message.id)
+            markStickerRead(message.id)
         }
         val invalidatedWait = preparationInvalidated
         pendingSends[message.id] = PendingSend(message, reading)
@@ -90,14 +107,60 @@ internal class ChatViewModel(
         return true
     }
 
-    private fun markRead(messageId: String) {
+    @MainThread
+    fun requestDialogue(definition: DialogueDefinition): Boolean {
+        if (!viewModelScope.isActive || narrativeSession != null) return false
+        val session = NarrativeSession(definition)
+        narrativeSession = session
+        if (reactionCoordinator == null) {
+            startDialogue(session)
+        } else if (pendingSends.isEmpty() && _uiState.value.communicationState == CommunicationState.RESPONDING) {
+            // This reaction has already committed, and no later batch needs admission.
+            hideInput()
+        }
+        return true
+    }
+
+    @MainThread
+    fun chooseDialogueOption(promptId: String, choiceId: String): Boolean {
+        if (!viewModelScope.isActive) return false
+        val session = narrativeSession ?: return false
+        val prompt = session.prompt ?: return false
+        val state = _uiState.value
+        val mode = state.inputMode as? ChatInputMode.Choices ?: return false
+        if (session.job?.isActive != true || prompt.id != promptId || mode.promptId != promptId) return false
+        val option = prompt.options.firstOrNull { it.id == choiceId } ?: return false
+
+        session.prompt = null
+        val message = try {
+            newTextMessage(MessageSender.PCHAN, option.textKey)
+        } catch (error: IOException) {
+            prompt.answer.completeExceptionally(error)
+            return false
+        }
+        _uiState.value = state.copy(messages = state.messages + message, inputMode = ChatInputMode.Hidden)
+        prompt.answer.complete(DialogueAnswer(choiceId, message.id))
+        return true
+    }
+
+    private fun markStickerRead(messageId: String) {
         val send = pendingSends[messageId] ?: return
         val message = send.message
         if (message.isRead) return
         val read = message.copy(readAt = maxOf(message.sentAt, now()))
         send.message = read
+        publishReadMessage(read)
+    }
+
+    private fun markNarrativeRead(messageId: String) {
+        val message = _uiState.value.messages.firstOrNull { it.id == messageId } ?: return
+        if (message.isRead) return
+        publishReadMessage(message.copy(readAt = maxOf(message.sentAt, now())))
+    }
+
+    private fun publishReadMessage(read: Message) {
         val state = _uiState.value
-        _uiState.value = state.copy(messages = state.messages.map { if (it.id == messageId) read else it })
+        _uiState.value = state.copy(messages = state.messages.map { if (it.id == read.id) read else it })
     }
 
     private suspend fun processBatches() {
@@ -108,8 +171,10 @@ internal class ChatViewModel(
                 val keys = replyKeys(batch)
                 currentCoroutineContext().ensureActive()
 
-                // Close the batch and publish its first reply without suspending.
+                // Close admission for a requested dialogue at the same boundary that commits the batch.
                 pendingSends.clear()
+                if (narrativeSession != null) hideInput()
+                currentCoroutineContext().ensureActive()
                 publishReply(keys.first())
                 for (textKey in keys.drop(1)) {
                     delay(timings.replyIntervalMs)
@@ -121,7 +186,12 @@ internal class ChatViewModel(
             reactionCoordinator = null
         }
         currentCoroutineContext().ensureActive()
-        _uiState.value = _uiState.value.copy(communicationState = CommunicationState.AVAILABLE)
+        val session = narrativeSession
+        if (session == null) {
+            _uiState.value = _uiState.value.copy(communicationState = CommunicationState.AVAILABLE)
+        } else {
+            startDialogue(session)
+        }
     }
 
     private suspend fun awaitPreparedBatch(): StickerBatch {
@@ -149,17 +219,77 @@ internal class ChatViewModel(
     }
 
     private fun publishReply(textKey: String) {
-        val reply = Message(
-            id = newMessageId(),
-            sender = MessageSender.AME,
-            content = MessageContent.Text(textKey),
-            sentAt = now()
-        )
+        val reply = newTextMessage(MessageSender.AME, textKey)
         val state = _uiState.value
         _uiState.value = state.copy(
             messages = state.messages + reply,
             communicationState = CommunicationState.RESPONDING
         )
+    }
+
+    private fun hideInput() {
+        _uiState.value = _uiState.value.copy(inputMode = ChatInputMode.Hidden)
+    }
+
+    private fun startDialogue(session: NarrativeSession) {
+        val job = viewModelScope.launch(dispatcher, start = CoroutineStart.LAZY) { runDialogue(session) }
+        session.job = job
+        _uiState.value = _uiState.value.copy(
+            communicationState = CommunicationState.AVAILABLE,
+            inputMode = ChatInputMode.Hidden
+        )
+        job.start()
+    }
+
+    private suspend fun runDialogue(session: NarrativeSession) {
+        try {
+            DialogueEngine.execute(
+                session.definition,
+                sendText = { textKey ->
+                    val message = newTextMessage(MessageSender.AME, textKey)
+                    val state = _uiState.value
+                    _uiState.value = state.copy(messages = state.messages + message)
+                },
+                awaitChoice = { options -> awaitDialogueChoice(session, options) }
+            )
+        } catch (error: IOException) {
+            logger.log(Level.WARNING, "Could not complete dialogue '${session.definition.id}'", error)
+        } catch (error: DialogueExecutionException) {
+            logger.log(Level.WARNING, "Could not complete dialogue '${session.definition.id}'", error)
+        } finally {
+            session.prompt?.answer?.cancel()
+            session.prompt = null
+            session.job = null
+            if (narrativeSession === session) narrativeSession = null
+        }
+        currentCoroutineContext().ensureActive()
+        _uiState.value = _uiState.value.copy(inputMode = ChatInputMode.Stickers)
+    }
+
+    private suspend fun awaitDialogueChoice(session: NarrativeSession, options: List<DialogueOption>): String {
+        val prompt = PendingPrompt("dialogue-prompt-${++nextPromptNumber}", options)
+        session.prompt = prompt
+        val mode = ChatInputMode.Choices(prompt.id, options.map { DialogueChoice(it.id, it.textKey) })
+        _uiState.value = _uiState.value.copy(inputMode = mode)
+
+        val answer = prompt.answer.await()
+        delay(timings.readMs)
+        currentCoroutineContext().ensureActive()
+        markNarrativeRead(answer.messageId)
+        delay(timings.replyPreparationMs)
+        return answer.choiceId
+    }
+
+    private fun newTextMessage(sender: MessageSender, textKey: String) = Message(
+        id = newMessageId(),
+        sender = sender,
+        content = MessageContent.Text(textKey),
+        sentAt = now()
+    )
+
+    override fun onCleared() {
+        narrativeSession?.prompt?.answer?.cancel()
+        narrativeSession = null
     }
 
     private fun replyKeys(batch: StickerBatch): List<String> {
