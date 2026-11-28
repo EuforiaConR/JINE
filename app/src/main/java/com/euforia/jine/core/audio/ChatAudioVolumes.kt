@@ -3,7 +3,7 @@ package com.euforia.jine.core.audio
 internal data class ChatAudioVolumes(
     val master: Float = 1f,
     val sfx: Float = 1f,
-    val bgm: Float = 1f
+    val bgm: Float = 0.5f
 ) {
     init {
         require(master in 0f..1f && sfx in 0f..1f && bgm in 0f..1f)
