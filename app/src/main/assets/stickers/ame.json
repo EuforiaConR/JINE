@@ -1,0 +1,85 @@
+{
+  "id": "ame",
+  "stickers": [
+    {
+      "id": "amechan",
+      "textures": {
+        "es": "textures/stickers/ame/es/amechan.png",
+        "en": "textures/stickers/ame/en/amechan.png"
+      },
+      "description_key": "sticker.ame.amechan",
+      "emotion": "affection",
+      "order": 0
+    },
+    {
+      "id": "aseru",
+      "textures": {
+        "es": "textures/stickers/ame/es/aseru.png",
+        "en": "textures/stickers/ame/en/aseru.png"
+      },
+      "description_key": "sticker.ame.aseru",
+      "emotion": "anxiety",
+      "order": 1
+    },
+    {
+      "id": "imajidorishiteru",
+      "textures": {
+        "es": "textures/stickers/ame/es/imajidorishiteru.png",
+        "en": "textures/stickers/ame/en/imajidorishiteru.png"
+      },
+      "description_key": "sticker.ame.imajidorishiteru",
+      "emotion": "playfulness",
+      "order": 2
+    },
+    {
+      "id": "kanzennakyuutai",
+      "textures": {
+        "es": "textures/stickers/ame/es/kanzennakyuutai.png",
+        "en": "textures/stickers/ame/en/kanzennakyuutai.png"
+      },
+      "description_key": "sticker.ame.kanzennakyuutai",
+      "emotion": "playfulness",
+      "order": 3
+    },
+    {
+      "id": "kawaikunai",
+      "textures": {
+        "es": "textures/stickers/ame/es/kawaikunai.png",
+        "en": "textures/stickers/ame/en/kawaikunai.png"
+      },
+      "description_key": "sticker.ame.kawaikunai",
+      "emotion": "disapproval",
+      "order": 4
+    },
+    {
+      "id": "kiitenai",
+      "textures": {
+        "es": "textures/stickers/ame/es/kiitenai.png",
+        "en": "textures/stickers/ame/en/kiitenai.png"
+      },
+      "description_key": "sticker.ame.kiitenai",
+      "emotion": "indifference",
+      "order": 5
+    },
+    {
+      "id": "toketeiru",
+      "textures": {
+        "es": "textures/stickers/ame/es/toketeiru.png",
+        "en": "textures/stickers/ame/en/toketeiru.png"
+      },
+      "description_key": "sticker.ame.toketeiru",
+      "emotion": "exhaustion",
+      "order": 6
+    },
+    {
+      "id": "zzz",
+      "textures": {
+        "es": "textures/stickers/ame/es/zzz.png",
+        "en": "textures/stickers/ame/en/zzz.png"
+      },
+      "description_key": "sticker.ame.zzz",
+      "emotion": "sleepiness",
+      "order": 7
+    }
+  ]
+}

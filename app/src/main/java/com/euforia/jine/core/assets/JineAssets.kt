@@ -53,5 +53,6 @@ object JineAssets {
         const val PCHAN_DIRECTORY = "$TEXTURES_DIRECTORY/pchan"
         const val AME_DIRECTORY = "$TEXTURES_DIRECTORY/ame"
         const val PCHAN_CATALOG = "stickers/pchan.json"
+        const val AME_CATALOG = "stickers/ame.json"
     }
 }

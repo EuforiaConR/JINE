@@ -234,6 +234,7 @@ class MusicPlaybackTest {
 }
 
 internal class TestAudioFocus(var granted: Boolean = true) : AudioFocusController {
+    private var listener: ((AudioFocusChange) -> Unit)? = null
     var requests = 0
         private set
     var abandons = 0
@@ -241,8 +242,14 @@ internal class TestAudioFocus(var granted: Boolean = true) : AudioFocusControlle
 
     override fun request(onChange: (AudioFocusChange) -> Unit): Boolean {
         requests++
+        if (granted) listener = onChange
         return granted
     }
 
-    override fun abandon() { abandons++ }
+    override fun abandon() {
+        listener = null
+        abandons++
+    }
+
+    fun emit(change: AudioFocusChange) = checkNotNull(listener)(change)
 }

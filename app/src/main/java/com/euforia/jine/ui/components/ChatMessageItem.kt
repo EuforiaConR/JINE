@@ -28,8 +28,7 @@ import com.euforia.jine.data.model.Message
 import com.euforia.jine.data.model.MessageContent
 import com.euforia.jine.data.model.MessageSender
 import com.euforia.jine.data.model.PCHAN_PACK_ID
-import com.euforia.jine.data.model.Sticker
-import com.euforia.jine.data.model.resolvePchanSticker
+import com.euforia.jine.data.model.StickerCatalogs
 import com.euforia.jine.data.repository.StickerRepository
 import com.euforia.jine.ui.theme.DinkieBitmapFont
 import com.euforia.jine.ui.theme.JineChatBackground
@@ -39,13 +38,14 @@ import com.euforia.jine.ui.theme.ZpixFont
 import com.euforia.jine.ui.theme.pixelFontSize
 
 internal const val CHAT_MESSAGE_TAG_PREFIX = "chat-message-"
-private val sentStickerSize = 72.dp
+private val messageStickerSize = 72.dp
+private val receivedStickerStartInset = 40.dp
 
 @Composable
 internal fun ChatMessageItem(
     message: Message,
     localization: LocalizationSnapshot,
-    stickersById: Map<String, Sticker>,
+    catalogs: StickerCatalogs,
     modifier: Modifier = Modifier
 ) {
     val alignment = when (message.sender) {
@@ -69,18 +69,16 @@ internal fun ChatMessageItem(
                     isRead = message.isRead
                 )
             }
-            is MessageContent.Sticker -> when (message.sender) {
-                MessageSender.AME -> UnavailableMessage()
-                MessageSender.PCHAN -> {
-                    val sticker = content.resolvePchanSticker(stickersById)
-                    if (sticker == null) {
-                        UnavailableMessage()
-                    } else {
-                        SentSticker(
-                            path = sticker.getTexture(localization.language),
-                            description = localization.translate(sticker.descriptionKey),
-                            isRead = message.isRead
-                        )
+            is MessageContent.Sticker -> {
+                val sticker = catalogs.resolve(message.sender, content)
+                if (sticker == null) {
+                    UnavailableMessage()
+                } else {
+                    val path = sticker.getTexture(localization.language)
+                    val description = localization.translate(sticker.descriptionKey)
+                    when (message.sender) {
+                        MessageSender.AME -> ReceivedSticker(path, description)
+                        MessageSender.PCHAN -> SentSticker(path, description, message.isRead)
                     }
                 }
             }
@@ -89,11 +87,22 @@ internal fun ChatMessageItem(
 }
 
 @Composable
+private fun ReceivedSticker(path: String, description: String) {
+    Box(Modifier.padding(start = receivedStickerStartInset)) {
+        PixelImage(
+            path = path,
+            modifier = Modifier.size(messageStickerSize),
+            contentDescription = description
+        )
+    }
+}
+
+@Composable
 private fun SentSticker(path: String, description: String, isRead: Boolean) {
     Column(horizontalAlignment = Alignment.Start) {
         PixelImage(
             path = path,
-            modifier = Modifier.size(sentStickerSize),
+            modifier = Modifier.size(messageStickerSize),
             contentDescription = description
         )
         if (isRead) MessageReadReceipt()
@@ -128,7 +137,7 @@ private fun UnavailableMessage() {
 private fun ReadStickerMessagePreview() {
     val context = LocalContext.current
     val localization = rememberLocalization(JineLanguageManager.DEFAULT_LANGUAGE)
-    val stickersById = remember(context) { StickerRepository.load(context).associateBy { it.id } }
+    val catalogs = remember(context) { StickerCatalogs(pchan = StickerRepository.load(context)) }
     val message = Message(
         id = "preview_read_sticker",
         sender = MessageSender.PCHAN,
@@ -139,7 +148,7 @@ private fun ReadStickerMessagePreview() {
 
     ProvideLocalizedResources(localization.language) {
         Box(Modifier.background(JineChatBackground).padding(12.dp)) {
-            ChatMessageItem(message, localization, stickersById)
+            ChatMessageItem(message, localization, catalogs)
         }
     }
 }

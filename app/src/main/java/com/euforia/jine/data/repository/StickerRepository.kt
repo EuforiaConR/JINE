@@ -3,8 +3,8 @@ package com.euforia.jine.data.repository
 import android.content.Context
 import com.euforia.jine.core.assets.JineAssetManager
 import com.euforia.jine.core.assets.JineAssets
-import com.euforia.jine.data.model.PCHAN_PACK_ID
 import com.euforia.jine.data.model.Sticker
+import com.euforia.jine.data.model.StickerPack
 import org.json.JSONArray
 import org.json.JSONException
 import org.json.JSONObject
@@ -14,14 +14,17 @@ class StickerCatalogException(catalogPath: String, details: String, cause: Excep
     IllegalStateException("Invalid sticker catalog '$catalogPath': $details", cause)
 
 object StickerRepository {
-    fun load(context: Context, catalogPath: String = JineAssets.Stickers.PCHAN_CATALOG): List<Sticker> {
+    fun load(context: Context, catalogPath: String = JineAssets.Stickers.PCHAN_CATALOG): List<Sticker> =
+        load(context, StickerPack.PCHAN, catalogPath)
+
+    internal fun load(context: Context, pack: StickerPack, catalogPath: String = pack.catalogPath): List<Sticker> {
         val json = try {
             JineAssetManager.getText(context, catalogPath)
         } catch (error: IOException) {
             throw StickerCatalogException(catalogPath, "Could not read catalog", error)
         }
 
-        return parse(catalogPath, json) { path ->
+        return parse(catalogPath, json, pack) { path ->
             context.assets.open(path).close()
         }
     }
@@ -29,6 +32,7 @@ object StickerRepository {
     internal fun parse(
         catalogPath: String,
         json: String,
+        expectedPack: StickerPack = StickerPack.PCHAN,
         checkTextureExists: (String) -> Unit
     ): List<Sticker> {
         val catalog = try {
@@ -37,8 +41,8 @@ object StickerRepository {
             throw StickerCatalogException(catalogPath, "Invalid JSON object", error)
         }
 
-        if (catalog.opt("id") != PCHAN_PACK_ID) {
-            throw StickerCatalogException(catalogPath, "Expected pack ID '$PCHAN_PACK_ID'")
+        if (catalog.opt("id") != expectedPack.id) {
+            throw StickerCatalogException(catalogPath, "Expected pack ID '${expectedPack.id}'")
         }
         val entries = catalog.opt("stickers") as? JSONArray
             ?: throw StickerCatalogException(catalogPath, "'stickers' must be an array")
@@ -63,7 +67,7 @@ object StickerRepository {
                     "Sticker '${sticker.id}' uses duplicate order ${sticker.order}"
                 )
             }
-            validateTextures(catalogPath, sticker, checkTextureExists)
+            validateTextures(catalogPath, expectedPack, sticker, checkTextureExists)
             sticker
         }
 
@@ -115,11 +119,12 @@ object StickerRepository {
 
     private fun validateTextures(
         catalogPath: String,
+        expectedPack: StickerPack,
         sticker: Sticker,
         checkTextureExists: (String) -> Unit
     ) {
         for ((language, path) in sticker.textures) {
-            val validPath = path.startsWith("${JineAssets.Stickers.TEXTURES_DIRECTORY}/") &&
+            val validPath = path.startsWith("${expectedPack.textureDirectory}/") &&
                 path.endsWith(".png") &&
                 '\\' !in path &&
                 path.split('/').none { it.isEmpty() || it == "." || it == ".." }

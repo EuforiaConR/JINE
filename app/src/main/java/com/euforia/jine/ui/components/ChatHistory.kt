@@ -33,7 +33,7 @@ import com.euforia.jine.core.audio.ChatSoundEvents
 import com.euforia.jine.core.localization.LocalizationSnapshot
 import com.euforia.jine.data.model.Message
 import com.euforia.jine.data.model.MessageSender
-import com.euforia.jine.data.model.Sticker
+import com.euforia.jine.data.model.StickerCatalogs
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
@@ -43,7 +43,7 @@ internal const val CHAT_HISTORY_TAG = "chat-history"
 internal fun ChatHistory(
     messages: List<Message>,
     localization: LocalizationSnapshot,
-    stickersById: Map<String, Sticker>,
+    catalogs: StickerCatalogs,
     state: LazyListState,
     viewport: IntSize,
     panelHeightPx: Int?,
@@ -124,7 +124,7 @@ internal fun ChatHistory(
             } else {
                 Modifier
             }
-            ChatMessageItem(message, localization, stickersById, modifier)
+            ChatMessageItem(message, localization, catalogs, modifier)
         }
     }
 }

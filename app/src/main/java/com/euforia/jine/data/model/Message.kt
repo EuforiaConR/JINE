@@ -24,7 +24,3 @@ data class Message(
     val isRead: Boolean
         get() = readAt != null
 }
-
-internal fun MessageContent.Sticker.resolvePchanSticker(stickersById: Map<String, Sticker>): Sticker? {
-    return if (packId == PCHAN_PACK_ID) stickersById[stickerId] else null
-}

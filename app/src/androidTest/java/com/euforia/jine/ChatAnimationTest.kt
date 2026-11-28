@@ -49,7 +49,9 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.euforia.jine.core.audio.AudioFocusChange
 import com.euforia.jine.core.audio.AudioSessionViewModel
+import com.euforia.jine.core.audio.ChatSoundEvents
 import com.euforia.jine.core.audio.ChatSoundCoordinator
 import com.euforia.jine.core.audio.JineAudioManager
 import com.euforia.jine.core.audio.MusicPlayer
@@ -57,10 +59,13 @@ import com.euforia.jine.core.audio.SoundEffect
 import com.euforia.jine.core.audio.SoundEffectPlayer
 import com.euforia.jine.core.localization.ProvideLocalizedResources
 import com.euforia.jine.core.localization.rememberLocalization
+import com.euforia.jine.data.model.AME_PACK_ID
 import com.euforia.jine.data.model.Message
 import com.euforia.jine.data.model.MessageContent
 import com.euforia.jine.data.model.MessageSender
 import com.euforia.jine.data.model.PCHAN_PACK_ID
+import com.euforia.jine.data.model.StickerCatalogs
+import com.euforia.jine.data.model.StickerPack
 import com.euforia.jine.data.model.dialogue.DialogueAction
 import com.euforia.jine.data.model.dialogue.DialogueDefinition
 import com.euforia.jine.data.model.dialogue.DialogueNode
@@ -77,6 +82,7 @@ import com.euforia.jine.ui.screens.ChatInputMode
 import com.euforia.jine.ui.screens.ChatScreen
 import com.euforia.jine.ui.screens.ChatViewModel
 import com.euforia.jine.ui.screens.DialogueChoice
+import com.euforia.jine.ui.screens.rememberChatSounds
 import com.euforia.jine.ui.theme.ChatAnimationSpec
 import com.euforia.jine.ui.theme.JINE_PANEL_OVERLAY_ALPHA
 import com.euforia.jine.ui.theme.JineBubble
@@ -117,8 +123,11 @@ class ChatAnimationTest {
         clockReads.incrementAndGet()
         monotonicNanos.get()
     })
-    private val stickers by lazy {
-        StickerRepository.load(InstrumentationRegistry.getInstrumentation().targetContext).associateBy { it.id }
+    private val catalogs by lazy {
+        StickerCatalogs(
+            pchan = StickerRepository.load(instrumentation.targetContext),
+            ame = StickerRepository.load(instrumentation.targetContext, StickerPack.AME)
+        )
     }
     private val gaming = DialogueChoice("gaming", "dialogue.preview.narrative.choice.gaming")
     private val talking = DialogueChoice("talking", "dialogue.preview.narrative.choice.talking")
@@ -485,6 +494,88 @@ class ChatAnimationTest {
     }
 
     @Test
+    fun newAmeStickerUsesTheHistoryFadeAndOneReceiveWithNoReplay() = withHost {
+        val language = mutableStateOf("es")
+        val established = ameSticker("established-sticker", "kawaikunai")
+        val history = mutableStateOf(List(8) { text("older-$it", key = "dialogue.preview.greeting") } + established)
+        val audio = RecordingSounds(TestCoroutineScheduler())
+        val focus = TestAudioFocus()
+        var preparations = 0
+        var plays = 0
+        val music = object : MusicPlayer by NoMusic {
+            override fun prepare() { preparations++ }
+            override fun play() { plays++ }
+        }
+        scenario.onActivity { activity ->
+            val factory = viewModelFactory {
+                initializer { AudioSessionViewModel(JineAudioManager(music, ChatSoundCoordinator(audio), focus)) }
+            }
+            val session = ViewModelProvider(activity, factory)[AudioSessionViewModel::class.java]
+            val host = session.bindHost(activity.lifecycle)
+            activity.setContent {
+                History(history.value, language.value, height = 230.dp, sounds = rememberChatSounds(host) { history.value })
+            }
+        }
+        settle(5)
+        val reference = row(established.id).pixels()
+        assertTrue(audio.effects.isEmpty())
+
+        val first = ameSticker("new-sticker", "kawaikunai")
+        onMain { history.value += first }
+        at(0)
+        assertTrue(row(first.id).pixels().values.all { near(it, JineChatBackground.toArgb(), 1) })
+        assertEquals(listOf(SoundEffect.RECEIVE), audio.effects)
+        at(100)
+        assertBlended(row(first.id).pixels(), reference, alpha = 0.5f)
+        onMain { language.value = "en" }
+        at(200)
+        assertTrue(row(first.id).find { it.contentDescription?.toString() == "So not cute!" } != null)
+        val englishPixels = row(first.id).pixels().values
+        scrollTo(0)
+        assertNull(findTag("$CHAT_MESSAGE_TAG_PREFIX${first.id}"))
+        scrollTo(history.value.lastIndex)
+        assertTrue(englishPixels.contentEquals(row(first.id).pixels().values))
+        assertEquals(listOf(SoundEffect.RECEIVE), audio.effects)
+        assertEquals(1, plays)
+
+        val instant = ameSticker("instant-sticker", "aseru")
+        onMain {
+            motion.scaleFactor = 0f
+            history.value += instant
+        }
+        at(200)
+        assertTrue(row(instant.id).pixels().values.any { !near(it, JineChatBackground.toArgb(), 1) })
+        assertEquals(List(2) { SoundEffect.RECEIVE }, audio.effects)
+
+        val undelivered = ameSticker("while-focus-lost", "zzz")
+        onMain {
+            focus.emit(AudioFocusChange.TRANSIENT_LOSS)
+            history.value += undelivered
+            focus.emit(AudioFocusChange.GAIN)
+        }
+        settle()
+        row(undelivered.id)
+        assertEquals(List(2) { SoundEffect.RECEIVE }, audio.effects)
+
+        val inBackground = ameSticker("while-backgrounded", "kiitenai")
+        scenario.moveToState(Lifecycle.State.CREATED)
+        onMain { history.value += inBackground }
+        scenario.moveToState(Lifecycle.State.RESUMED)
+        settle()
+        row(inBackground.id)
+        assertEquals(List(2) { SoundEffect.RECEIVE }, audio.effects)
+
+        val next = ameSticker("after-resume", "amechan")
+        onMain { history.value += next }
+        settle()
+        row(next.id)
+        assertEquals(List(3) { SoundEffect.RECEIVE }, audio.effects)
+        assertEquals(1, preparations)
+        assertEquals(3, plays)
+        assertEquals(2, focus.requests)
+    }
+
+    @Test
     fun deniedFocusLeavesChatFunctionalAndNewEffectsCanPlayAfterResume() = withHost {
         val scheduler = TestCoroutineScheduler()
         val player = RecordingSounds(scheduler)
@@ -588,7 +679,8 @@ class ChatAnimationTest {
         messages: List<Message>,
         language: String = "es",
         height: Dp = 540.dp,
-        width: Dp = 360.dp
+        width: Dp = 360.dp,
+        sounds: ChatSoundEvents? = null
     ) {
         val localization = rememberLocalization(language)
         CompositionLocalProvider(LocalChatAnimationSpec provides spec) {
@@ -598,8 +690,8 @@ class ChatAnimationTest {
                         val state = rememberLazyListState()
                         SideEffect { listState = state }
                         ChatHistory(
-                            messages, localization, stickers, state,
-                            IntSize(constraints.maxWidth, constraints.maxHeight), panelHeightPx = 0
+                            messages, localization, catalogs, state,
+                            IntSize(constraints.maxWidth, constraints.maxHeight), panelHeightPx = 0, sounds = sounds
                         )
                     }
                 }
@@ -671,6 +763,9 @@ class ChatAnimationTest {
 
     private fun sticker(id: String) =
         Message(id, MessageSender.PCHAN, MessageContent.Sticker(PCHAN_PACK_ID, "love"), sentAt = 0L)
+
+    private fun ameSticker(messageId: String, stickerId: String) =
+        Message(messageId, MessageSender.AME, MessageContent.Sticker(AME_PACK_ID, stickerId), 0L, readAt = 1L)
 
     private fun row(id: String) = awaitTag("$CHAT_MESSAGE_TAG_PREFIX$id")
     private fun option(choice: DialogueChoice) = awaitTag("$CHAT_CHOICE_TAG_PREFIX${choice.id}")

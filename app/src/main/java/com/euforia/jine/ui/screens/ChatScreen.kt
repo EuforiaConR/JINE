@@ -15,6 +15,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
@@ -43,6 +44,8 @@ import com.euforia.jine.data.model.MessageContent
 import com.euforia.jine.data.model.MessageSender
 import com.euforia.jine.data.model.PCHAN_PACK_ID
 import com.euforia.jine.data.model.Sticker
+import com.euforia.jine.data.model.StickerCatalogs
+import com.euforia.jine.data.model.StickerPack
 import com.euforia.jine.data.repository.StickerCatalogException
 import com.euforia.jine.data.repository.StickerRepository
 import com.euforia.jine.ui.components.ChatHeader
@@ -76,26 +79,18 @@ internal fun ChatScreen(
     viewModel: ChatViewModel,
     language: String = JineLanguageManager.DEFAULT_LANGUAGE,
     audioHost: JineAudioManager.Host? = null,
+    catalogs: StickerCatalogs = rememberStickerCatalogs(),
     onStickerSent: (Sticker) -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    val stickers = rememberStickerCatalog()
-    val validStickerIds = remember(stickers) { stickers.orEmpty().map { it.id }.toSet() }
+    val validStickerIds = remember(catalogs.pchan) { catalogs.pchan.orEmpty().map { it.id }.toSet() }
 
     key(viewModel) {
-        val sounds = remember(audioHost, viewModel) {
-            audioHost?.createChat { viewModel.uiState.value.messages }
-        }
-        if (sounds != null) {
-            DisposableEffect(sounds) {
-                sounds.attach()
-                onDispose(sounds::detach)
-            }
-        }
+        val sounds = rememberChatSounds(audioHost) { viewModel.uiState.value.messages }
         ChatContent(
             uiState,
             language,
-            stickers,
+            catalogs,
             onStickerPressed = { sticker ->
                 if (viewModel.sendSticker(sticker.id, validStickerIds)) {
                     sounds?.onInteractionAccepted()
@@ -111,29 +106,47 @@ internal fun ChatScreen(
 }
 
 @Composable
-private fun rememberStickerCatalog(): List<Sticker>? {
-    val context = LocalContext.current
-    return remember(context) {
-        try {
-            StickerRepository.load(context)
-        } catch (error: StickerCatalogException) {
-            Log.e("JineChat", "Could not load the sticker panel", error)
-            null
-        }
+internal fun rememberChatSounds(
+    audioHost: JineAudioManager.Host?,
+    history: () -> List<Message>
+): ChatSoundEvents? {
+    if (audioHost == null) return null
+    val currentHistory by rememberUpdatedState(history)
+    val sounds = remember(audioHost) { audioHost.createChat { currentHistory() } }
+    DisposableEffect(sounds) {
+        sounds.attach()
+        onDispose(sounds::detach)
     }
+    return sounds
+}
+
+@Composable
+internal fun rememberStickerCatalogs(): StickerCatalogs {
+    val context = LocalContext.current.applicationContext
+    return remember(context) { loadStickerCatalogs { pack -> StickerRepository.load(context, pack) } }
+}
+
+internal fun loadStickerCatalogs(load: (StickerPack) -> List<Sticker>): StickerCatalogs {
+    fun tryLoad(pack: StickerPack): List<Sticker>? = try {
+        load(pack)
+    } catch (error: StickerCatalogException) {
+        Log.e("JineChat", "Could not load ${pack.id} stickers from ${pack.catalogPath}", error)
+        null
+    }
+
+    return StickerCatalogs(pchan = tryLoad(StickerPack.PCHAN), ame = tryLoad(StickerPack.AME))
 }
 
 @Composable
 internal fun ChatContent(
     uiState: ChatUiState,
     language: String,
-    stickers: List<Sticker>?,
+    catalogs: StickerCatalogs,
     onStickerPressed: (Sticker) -> Unit = {},
     onChoicePressed: (promptId: String, choiceId: String) -> Unit = { _, _ -> },
     sounds: ChatSoundEvents? = null
 ) {
     val localization = rememberLocalization(language)
-    val stickersById = remember(stickers) { stickers.orEmpty().associateBy { it.id } }
     val historyState = rememberLazyListState()
 
     // The resolved language may be Spanish if the requested catalog was unavailable.
@@ -156,7 +169,7 @@ internal fun ChatContent(
                 ChatHistory(
                     messages = uiState.messages,
                     localization = localization,
-                    stickersById = stickersById,
+                    catalogs = catalogs,
                     state = historyState,
                     viewport = IntSize(constraints.maxWidth, constraints.maxHeight),
                     panelHeightPx = panelHeightPx,
@@ -196,11 +209,11 @@ internal fun ChatContent(
                             when (mode) {
                                 ChatInputMode.Hidden -> Unit
                                 ChatInputMode.Stickers -> {
-                                    if (stickers == null) {
+                                    if (catalogs.pchan == null) {
                                         StickerPanelStatus(R.string.sticker_catalog_error)
                                     } else {
                                         StickerPicker(
-                                            stickers = stickers,
+                                            stickers = catalogs.pchan,
                                             onStickerPressed = onStickerPressed,
                                             descriptionFor = { sticker ->
                                                 localization.translate(sticker.descriptionKey)
@@ -239,7 +252,7 @@ private fun ChatHistoryPreview() {
             text.copy(id = "preview_history_$index", sentAt = index.toLong())
         }
     }
-    ChatContent(ChatUiState(history), JineLanguageManager.DEFAULT_LANGUAGE, rememberStickerCatalog())
+    ChatContent(ChatUiState(history), JineLanguageManager.DEFAULT_LANGUAGE, rememberStickerCatalogs())
 }
 
 @Preview(name = "Hilo sin panel · textos de P-chan", showBackground = true, widthDp = 360, heightDp = 780)
@@ -254,7 +267,7 @@ private fun HiddenPanelPreview() {
     ChatContent(
         ChatUiState(messages, inputMode = ChatInputMode.Hidden),
         JineLanguageManager.DEFAULT_LANGUAGE,
-        rememberStickerCatalog()
+        rememberStickerCatalogs()
     )
 }
 
@@ -295,7 +308,7 @@ private fun ChoicesPreview(language: String, choices: List<DialogueChoice>) {
         ChatContent(
             ChatUiState(messages, inputMode = ChatInputMode.Choices("preview-stream", choices)),
             language,
-            rememberStickerCatalog()
+            rememberStickerCatalogs()
         )
     }
 }
@@ -307,13 +320,13 @@ private fun ChoicesPreview(language: String, choices: List<DialogueChoice>) {
 )
 @Composable
 fun ChatScreenPreview() {
-    ChatContent(ChatUiState(initialMessages(0L)), JineLanguageManager.DEFAULT_LANGUAGE, rememberStickerCatalog())
+    ChatContent(ChatUiState(initialMessages(0L)), JineLanguageManager.DEFAULT_LANGUAGE, rememberStickerCatalogs())
 }
 
 @Preview(name = "English", showBackground = true, widthDp = 360, heightDp = 780)
 @Composable
 private fun ChatScreenEnglishPreview() {
-    ChatContent(ChatUiState(initialMessages(0L)), JineLanguageManager.ENGLISH, rememberStickerCatalog())
+    ChatContent(ChatUiState(initialMessages(0L)), JineLanguageManager.ENGLISH, rememberStickerCatalogs())
 }
 
 @Preview(name = "Ame respondiendo · selector activo", showBackground = true, widthDp = 360, heightDp = 780)
@@ -342,6 +355,6 @@ private fun ChatRespondingPreview() {
             communicationState = CommunicationState.RESPONDING
         ),
         language = JineLanguageManager.DEFAULT_LANGUAGE,
-        stickers = rememberStickerCatalog()
+        catalogs = rememberStickerCatalogs()
     )
 }

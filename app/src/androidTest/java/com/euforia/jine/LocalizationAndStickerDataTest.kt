@@ -1,5 +1,6 @@
 package com.euforia.jine
 
+import android.graphics.BitmapFactory
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.euforia.jine.core.assets.JineAssetManager
@@ -10,6 +11,7 @@ import com.euforia.jine.data.model.Message
 import com.euforia.jine.data.model.MessageContent
 import com.euforia.jine.data.model.MessageSender
 import com.euforia.jine.data.model.PCHAN_PACK_ID
+import com.euforia.jine.data.model.StickerPack
 import com.euforia.jine.data.model.dialogue.DialogueAction
 import com.euforia.jine.data.repository.StickerCatalogException
 import com.euforia.jine.data.repository.DialogueRepository
@@ -58,6 +60,67 @@ class LocalizationAndStickerDataTest {
                 assertTrue(description.isNotBlank())
                 assertTrue(!description.startsWith("[missing: "))
             }
+        }
+    }
+
+    @Test
+    fun ameCatalogUsesBothPackagedPngVariantsAndAccessibleDescriptions() {
+        val stickers = StickerRepository.load(context, StickerPack.AME)
+        val ids = listOf("amechan", "aseru", "imajidorishiteru", "kanzennakyuutai", "kawaikunai", "kiitenai", "toketeiru", "zzz")
+        assertEquals(ids, stickers.map { it.id })
+        assertEquals(ids.indices.toList(), stickers.map { it.order })
+        assertEquals(
+            listOf("affection", "anxiety", "playfulness", "playfulness", "disapproval", "indifference", "exhaustion", "sleepiness"),
+            stickers.map { it.emotion }
+        )
+        val labels = mapOf(
+            "es" to listOf("Retrato de Ame", "Nerviosa", "Selfie con morritos", "Soy una bolita", "Qué poco mono", "Ignorando", "Derretida", "Durmiendo"),
+            "en" to listOf("Ame portrait", "Nervous", "Selfie", "I'm orb", "So not cute!", "Ignore", "Melting", "Sleeping")
+        )
+        val manager = JineLanguageManager()
+        for ((language, descriptions) in labels) {
+            val localization = manager.load(context, language)
+            assertEquals(language, localization.language)
+            for ((index, sticker) in stickers.withIndex()) {
+                assertEquals(labels.keys, sticker.textures.keys)
+                assertEquals("sticker.ame.${sticker.id}", sticker.descriptionKey)
+                assertEquals(descriptions[index], localization.translate(sticker.descriptionKey))
+                assertEquals(sticker.getTexture("es"), sticker.getTexture("fr"))
+                val path = "${StickerPack.AME.textureDirectory}/$language/${sticker.id}.png"
+                assertEquals(path, sticker.getTexture(language))
+                context.assets.open(path).use { stream ->
+                    val bitmap = checkNotNull(BitmapFactory.decodeStream(stream)) { "Could not decode $path" }
+                    try {
+                        assertTrue(bitmap.width > 0 && bitmap.height > 0)
+                    } finally {
+                        bitmap.recycle()
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    fun catalogMustMatchExpectedPackAndKeepTexturesInsideItsDirectory() {
+        assertThrows(StickerCatalogException::class.java) {
+            StickerRepository.load(context, JineAssets.Stickers.AME_CATALOG)
+        }
+        assertThrows(StickerCatalogException::class.java) {
+            StickerRepository.load(context, StickerPack.AME, JineAssets.Stickers.PCHAN_CATALOG)
+        }
+
+        for ((pack, other) in listOf(StickerPack.AME to StickerPack.PCHAN, StickerPack.PCHAN to StickerPack.AME)) {
+            val ownTexture = "${pack.textureDirectory}/es/example.png"
+            val crossPack = "${other.textureDirectory}/en/example.png"
+            val entry = sticker(textures = JSONObject().put("es", ownTexture).put("en", crossPack))
+            val json = """{"id":"${pack.id}","stickers":[$entry]}"""
+            val opened = mutableListOf<String>()
+            val failure = assertThrows(StickerCatalogException::class.java) {
+                StickerRepository.parse(FIXTURE_PATH, json, pack, opened::add)
+            }
+            assertEquals(listOf(ownTexture), opened)
+            assertTextureErrorContext(failure, "en", crossPack)
+            assertTrue(failure.message.orEmpty().contains("invalid texture"))
         }
     }
 
@@ -307,7 +370,7 @@ class LocalizationAndStickerDataTest {
     ) = StickerRepository.parse(
         FIXTURE_PATH,
         """{"id":"pchan","stickers":[${entries.joinToString()}]}""",
-        checkTextureExists
+        checkTextureExists = checkTextureExists
     )
 
     private fun sticker(

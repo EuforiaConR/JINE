@@ -1,15 +1,17 @@
 package com.euforia.jine
 
+import com.euforia.jine.data.model.AME_PACK_ID
 import com.euforia.jine.data.model.MessageContent
 import com.euforia.jine.data.model.MessageSender
 import com.euforia.jine.data.model.PCHAN_PACK_ID
 import com.euforia.jine.data.model.Sticker
-import com.euforia.jine.data.model.resolvePchanSticker
+import com.euforia.jine.data.model.StickerCatalogs
 import com.euforia.jine.ui.screens.createStickerMessage
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -70,11 +72,29 @@ class StickerSendingTest {
     @Test
     fun stickerReferenceUsesPackAndIdAndResolvesPathsByLanguage() {
         val content = MessageContent.Sticker(PCHAN_PACK_ID, "love")
-        val resolved = checkNotNull(content.resolvePchanSticker(stickers))
+        val catalogs = StickerCatalogs(pchan = stickers.values.toList())
+        val resolved = checkNotNull(catalogs.resolve(MessageSender.PCHAN, content))
         assertEquals("textures/stickers/pchan/es/love.png", resolved.getTexture("es"))
         assertEquals("textures/stickers/pchan/en/love.png", resolved.getTexture("en"))
         assertEquals(resolved.getTexture("es"), resolved.getTexture("fr"))
-        assertNull(content.copy(packId = "ame").resolvePchanSticker(stickers))
-        assertNull(content.copy(stickerId = "unknown").resolvePchanSticker(stickers))
+        assertNull(catalogs.resolve(MessageSender.PCHAN, content.copy(packId = AME_PACK_ID)))
+        assertNull(catalogs.resolve(MessageSender.PCHAN, content.copy(stickerId = "unknown")))
+    }
+
+    @Test
+    fun identicalIdsAreScopedByPackAndOnlyResolveForTheirSender() {
+        val pchan = stickers.getValue("ok")
+        val ame = pchan.copy(textures = mapOf("es" to "textures/stickers/ame/es/ok.png"))
+        val catalogs = StickerCatalogs(pchan = listOf(pchan), ame = listOf(ame))
+        val sent = MessageContent.Sticker(PCHAN_PACK_ID, "ok")
+        val received = MessageContent.Sticker(AME_PACK_ID, "ok")
+
+        assertSame(pchan, catalogs.resolve(MessageSender.PCHAN, sent))
+        assertSame(ame, catalogs.resolve(MessageSender.AME, received))
+        assertNull(catalogs.resolve(MessageSender.PCHAN, received))
+        assertNull(catalogs.resolve(MessageSender.AME, sent))
+        assertNull(catalogs.resolve(MessageSender.AME, received.copy(packId = "unknown")))
+        assertNull(catalogs.resolve(MessageSender.PCHAN, sent.copy(packId = "unknown")))
+        assertNull(catalogs.resolve(MessageSender.AME, received.copy(stickerId = "unknown")))
     }
 }

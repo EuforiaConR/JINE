@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalConfiguration
@@ -35,14 +36,23 @@ import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.euforia.jine.core.assets.JineAssets
+import com.euforia.jine.core.audio.AudioSessionViewModel
+import com.euforia.jine.core.audio.ChatSoundCoordinator
+import com.euforia.jine.core.audio.JineAudioManager
+import com.euforia.jine.core.audio.MusicPlayer
+import com.euforia.jine.core.audio.SoundEffect
+import com.euforia.jine.core.audio.SoundEffectPlayer
 import com.euforia.jine.core.localization.JineLanguageManager
 import com.euforia.jine.core.localization.ProvideLocalizedResources
 import com.euforia.jine.core.localization.rememberLocalization
+import com.euforia.jine.data.model.AME_PACK_ID
 import com.euforia.jine.data.model.Message
 import com.euforia.jine.data.model.MessageContent
 import com.euforia.jine.data.model.MessageSender
 import com.euforia.jine.data.model.PCHAN_PACK_ID
 import com.euforia.jine.data.model.Sticker
+import com.euforia.jine.data.model.StickerCatalogs
+import com.euforia.jine.data.model.StickerPack
 import com.euforia.jine.data.repository.StickerRepository
 import com.euforia.jine.data.repository.DialogueRepository
 import com.euforia.jine.ui.components.CHAT_MESSAGE_TAG_PREFIX
@@ -64,6 +74,7 @@ import com.euforia.jine.ui.screens.ChatViewModel
 import com.euforia.jine.ui.screens.CommunicationState
 import com.euforia.jine.ui.screens.DialogueChoice
 import com.euforia.jine.ui.screens.initialMessages
+import com.euforia.jine.ui.screens.loadStickerCatalogs
 import com.euforia.jine.ui.theme.ChatAnimationSpec
 import com.euforia.jine.ui.theme.JineChatBackground
 import com.euforia.jine.ui.theme.LocalChatAnimationSpec
@@ -83,6 +94,7 @@ import java.util.Locale
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
+import kotlin.math.roundToInt
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(AndroidJUnit4::class)
@@ -140,6 +152,9 @@ class ChatLocalizationTest {
             assertEquals(1, positions.take(4).map { it.top }.distinct().size)
             assertEquals(1, positions.drop(4).map { it.top }.distinct().size)
             assertTrue(positions[4].top > positions[0].top)
+            for (sticker in StickerRepository.load(context, StickerPack.AME)) {
+                assertNull(findVisibleNode { it.viewIdResourceName == "$PICKER_STICKER_TAG_PREFIX${sticker.id}" })
+            }
 
             val spanishLove = boundsOf(awaitPickerSticker("love", "Que viva el amor"))
             val spanishLovePixels = capturePixels(scenario, spanishLove)
@@ -468,7 +483,10 @@ class ChatLocalizationTest {
         val displayedHistory = mutableStateOf(history)
         ActivityScenario.launch(ComponentActivity::class.java).use { scenario ->
             scenario.onActivity { activity ->
-                activity.setStaticChatContent { ChatContent(ChatUiState(displayedHistory.value), "es", stickers) }
+                activity.setStaticChatContent {
+                    val catalogs = remember { StickerCatalogs(pchan = stickers) }
+                    ChatContent(ChatUiState(displayedHistory.value), "es", catalogs)
+                }
             }
             awaitInReadingArea(history.last().id)
             val track = scrollbarBounds()
@@ -509,7 +527,8 @@ class ChatLocalizationTest {
             scenario.onActivity { activity ->
                 activity.setStaticChatContent {
                     Box(Modifier.size(320.dp, height.value)) {
-                        ChatContent(ChatUiState(history), "es", catalog.value)
+                        val catalogs = remember(catalog.value) { StickerCatalogs(pchan = catalog.value) }
+                        ChatContent(ChatUiState(history), "es", catalogs)
                     }
                 }
             }
@@ -577,6 +596,93 @@ class ChatLocalizationTest {
             advanceChat(scenario, scheduler, 0)
             awaitHiddenPanel()
             awaitMessage("oye, p-chan!!", "timed-3")
+        }
+    }
+
+    @Test
+    fun ameDebugDemoShowsAllEightLocalizedStickersAndLeavesTheRealChatIntact() {
+        val scheduler = TestCoroutineScheduler()
+        val factory = controlledChatFactory(scheduler, ChatTimings())
+        val effects = mutableListOf<SoundEffect>()
+        val soundPlayer = object : SoundEffectPlayer {
+            override fun play(effect: SoundEffect, volume: Float): Boolean = effects.add(effect)
+            override fun stopAll() = Unit
+            override fun release() = Unit
+        }
+        var musicStarts = 0
+        val music = object : MusicPlayer {
+            override fun prepare() = Unit
+            override fun play() { musicStarts++ }
+            override fun pause() = Unit
+            override fun setVolume(volume: Float) = Unit
+            override fun release() = Unit
+        }
+        val focus = TestAudioFocus()
+        ActivityScenario.launch(ComponentActivity::class.java).use { scenario ->
+            lateinit var chat: ChatViewModel
+            scenario.onActivity { activity ->
+                chat = ViewModelProvider(activity, factory)[ChatViewModel::class.java]
+                val audioFactory = viewModelFactory {
+                    initializer { AudioSessionViewModel(JineAudioManager(music, ChatSoundCoordinator(soundPlayer), focus)) }
+                }
+                val audio = ViewModelProvider(activity, audioFactory)[AudioSessionViewModel::class.java]
+                val host = audio.bindHost(activity.lifecycle)
+                activity.setStaticChatContent { JineApp(chat, audioHost = host) }
+            }
+            tap(awaitPickerSticker("ok", "De acuerdo"))
+            awaitMessage("De acuerdo", "timed-1")
+            tap(awaitNode("Debug · Stickers de Ame"))
+            assertNull(findVisibleNode { it.text?.toString() == "Añadir sticker de Ame" })
+            advanceChat(scenario, scheduler, 1_600)
+            awaitMessage("okeeey", "timed-2")
+            val realState = chat.uiState.value
+            var effectsBeforeDemo = 0
+            scenario.onActivity { effectsBeforeDemo = effects.size }
+
+            tap(awaitNode("Debug · Stickers de Ame"))
+            awaitNode("Que viva el amor")
+            awaitNode("Leído")
+            awaitHiddenPanel()
+            val spanish = listOf(
+                "Retrato de Ame", "Nerviosa", "Selfie con morritos", "Soy una bolita",
+                "Qué poco mono", "Ignorando", "Derretida", "Durmiendo"
+            )
+            val english = listOf(
+                "Ame portrait", "Nervous", "Selfie", "I'm orb", "So not cute!", "Ignore", "Melting", "Sleeping"
+            )
+            val demoIds = spanish.map { label ->
+                tap(awaitNode("Añadir sticker de Ame"))
+                awaitNode(label)
+                visibleMessageIds().single { id ->
+                    findNodeInTag("$CHAT_MESSAGE_TAG_PREFIX$id") { it.contentDescription?.toString() == label } != null
+                }
+            }
+            assertEquals(8, demoIds.toSet().size)
+            tap(awaitNode("English"))
+            awaitMessage(english.last(), demoIds.last())
+            val unseen = demoIds.zip(english).toMap().toMutableMap()
+            for (page in 0..8) {
+                instrumentation.uiAutomation.waitForIdle(250, 5_000)
+                refreshAccessibility()
+                unseen.entries.removeAll { (id, label) ->
+                    findNodeInTag("$CHAT_MESSAGE_TAG_PREFIX$id") { it.contentDescription?.toString() == label } != null
+                }
+                if (unseen.isEmpty()) break
+                if (!awaitTag(CHAT_HISTORY_TAG).performAction(AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD)) break
+            }
+            assertTrue("Missing localized stickers: ${unseen.values}", unseen.isEmpty())
+            assertEquals(realState, chat.uiState.value)
+            tap(awaitNode("Volver al chat"))
+            awaitPickerSticker("ok", "De acuerdo")
+            awaitMessage("okeeey", "timed-2")
+            assertEquals(realState, chat.uiState.value)
+            assertTrue(visibleMessageIds().none { it in demoIds })
+            awaitNode("Debug · Demo narrativa")
+            scenario.onActivity {
+                assertEquals(List(8) { SoundEffect.RECEIVE }, effects.drop(effectsBeforeDemo))
+                assertEquals(1, musicStarts)
+                assertEquals(1, focus.requests)
+            }
         }
     }
 
@@ -706,7 +812,7 @@ class ChatLocalizationTest {
                     ChatContent(
                         uiState = state.value,
                         language = language.value,
-                        stickers = stickers,
+                        catalogs = remember { StickerCatalogs(pchan = stickers) },
                         onChoicePressed = { promptId, choiceId ->
                             events.add(promptId to choiceId)
                             val choice = options.single { it.id == choiceId }
@@ -784,7 +890,9 @@ class ChatLocalizationTest {
         val stickers = StickerRepository.load(context)
         ActivityScenario.launch(ComponentActivity::class.java).use { scenario ->
             scenario.onActivity { activity ->
-                activity.setStaticChatContent { ChatContent(state.value, "es", stickers) }
+                activity.setStaticChatContent {
+                    ChatContent(state.value, "es", remember { StickerCatalogs(pchan = stickers) })
+                }
             }
             awaitInReadingArea(history.last().id)
             val panel = awaitScrollbarAtPanel(CHAT_CHOICE_PANEL_TAG)
@@ -838,7 +946,7 @@ class ChatLocalizationTest {
             activity.setStaticChatContent {
                 Box(Modifier.size(320.dp, height.value)) {
                     ChatContent(
-                        state.value, "es", catalog.value,
+                        state.value, "es", remember(catalog.value) { StickerCatalogs(pchan = catalog.value) },
                         onChoicePressed = { prompt, choice -> events.add(prompt to choice) }
                     )
                 }
@@ -902,9 +1010,112 @@ class ChatLocalizationTest {
     }
 
     @Test
+    fun receivedStickerIsExactlyTheLocalizedSpriteWithAnInsetAndNoDecoration() {
+        val language = mutableStateOf("es")
+        val catalogs = StickerCatalogs(pchan = null, ame = StickerRepository.load(context, StickerPack.AME))
+        val received = Message("received", MessageSender.AME, MessageContent.Sticker(AME_PACK_ID, "kawaikunai"), 1L, 2L)
+        val background = JineChatBackground.toArgb()
+        ActivityScenario.launch(ComponentActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                activity.setStaticChatContent {
+                    val localization = rememberLocalization(language.value)
+                    ProvideLocalizedResources(localization.language) {
+                        Column(Modifier.fillMaxWidth().background(JineChatBackground)) {
+                            ChatMessageItem(received, localization, catalogs)
+                            PixelImage(
+                                path = "${StickerPack.AME.textureDirectory}/${localization.language}/kawaikunai.png",
+                                modifier = Modifier.size(72.dp),
+                                contentDescription = "Reference received sprite"
+                            )
+                        }
+                    }
+                }
+            }
+
+            fun assertSticker(label: String, receipt: String): IntArray {
+                val tag = "$CHAT_MESSAGE_TAG_PREFIX${received.id}"
+                val image = awaitMessage(label, received.id)
+                val bounds = boundsOf(image)
+                val row = boundsOf(awaitTag(tag))
+                val density = context.resources.displayMetrics.density
+                assertEquals((40 * density).roundToInt(), bounds.left - row.left)
+                assertEquals((72 * density).roundToInt(), bounds.width())
+                assertEquals(bounds.height(), row.height())
+                assertTrue(bounds.centerX() < row.centerX())
+                assertFalse(image.isClickable)
+                assertNull(findNodeInTag(tag) { it.text?.toString() in setOf(label, receipt) })
+
+                val pixels = capturePixels(scenario, bounds)
+                val reference = capturePixels(scenario, boundsOf(awaitNode("Reference received sprite")))
+                assertTrue("Expected the exact localized texture", pixels.contentEquals(reference))
+                val rowPixels = capturePixels(scenario, row)
+                assertTrue("Expected only the chat background outside the sprite", rowPixels.indices.all { index ->
+                    val x = row.left + index % row.width()
+                    x in bounds.left until bounds.right || rowPixels[index] == background
+                })
+                return pixels
+            }
+
+            val spanish = assertSticker("Qué poco mono", "Leído")
+            scenario.onActivity { language.value = "en" }
+            val english = assertSticker("So not cute!", "Read")
+            assertFalse(spanish.contentEquals(english))
+            assertEquals(listOf(received.id), visibleMessageIds())
+        }
+    }
+
+    @Test
+    fun catalogFailuresAreIsolatedAndThePickerOnlyShowsPchanStickers() {
+        fun catalogsWithout(missing: StickerPack) = loadStickerCatalogs { pack ->
+            val path = if (pack == missing) "stickers/missing_${pack.id}.json" else pack.catalogPath
+            StickerRepository.load(context, pack, path)
+        }
+
+        val withoutAme = catalogsWithout(StickerPack.AME)
+        val withoutPchan = catalogsWithout(StickerPack.PCHAN)
+        assertNull(withoutAme.ame)
+        assertNull(withoutPchan.pchan)
+        val factory = controlledChatFactory(TestCoroutineScheduler())
+        val selected = mutableListOf<String>()
+        ActivityScenario.launch(ComponentActivity::class.java).use { scenario ->
+            lateinit var chat: ChatViewModel
+            scenario.onActivity { activity ->
+                chat = ViewModelProvider(activity, factory)[ChatViewModel::class.java]
+                activity.setStaticChatContent {
+                    ChatScreen(chat, catalogs = withoutAme, onStickerSent = { selected.add(it.id) })
+                }
+            }
+            awaitPickerSticker("love", "Que viva el amor")
+            tap(awaitPickerSticker("ok", "De acuerdo"))
+            awaitMessage("De acuerdo", "timed-1")
+            scenario.onActivity { assertEquals(listOf("ok"), selected) }
+
+            val ame = Message("ame-catalog-only", MessageSender.AME, MessageContent.Sticker(AME_PACK_ID, "amechan"), 1L)
+            val pchan = Message("missing-pchan", MessageSender.PCHAN, MessageContent.Sticker(PCHAN_PACK_ID, "love"), 0L)
+            val catalogs = mutableStateOf(withoutPchan)
+            scenario.onActivity { activity ->
+                activity.setStaticChatContent {
+                    ChatContent(ChatUiState(listOf(pchan, ame)), "es", catalogs.value)
+                }
+            }
+            awaitNode("No se pudieron cargar los stickers.")
+            awaitMessage("Retrato de Ame", ame.id)
+            awaitMessage("Mensaje no disponible", pchan.id)
+            scenario.onActivity { catalogs.value = StickerCatalogs(withoutAme.pchan, withoutPchan.ame) }
+            awaitPickerSticker("ok", "De acuerdo")
+            awaitInReadingArea(ame.id)
+            awaitMessage("Retrato de Ame", ame.id)
+            awaitMessage("Que viva el amor", pchan.id)
+            scenario.onActivity { catalogs.value = withoutAme }
+            awaitPickerSticker("ok", "De acuerdo")
+            awaitMessage("Mensaje no disponible", ame.id)
+        }
+    }
+
+    @Test
     fun readReceiptBelongsToOneMessageAndSentImageMatchesTheLocalizedAsset() {
         val language = mutableStateOf("es")
-        val stickersById = StickerRepository.load(context).associateBy { it.id }
+        val catalogs = StickerCatalogs(pchan = StickerRepository.load(context))
         val sticker = MessageContent.Sticker(PCHAN_PACK_ID, "love")
         val unread = Message("unread", MessageSender.PCHAN, sticker, sentAt = 1L)
         val read = Message("read", MessageSender.PCHAN, sticker, sentAt = 2L, readAt = 3L)
@@ -927,13 +1138,13 @@ class ChatLocalizationTest {
                     val localization = rememberLocalization(language.value)
                     ProvideLocalizedResources(localization.language) {
                         Column(Modifier.fillMaxWidth().background(JineChatBackground)) {
-                            ChatMessageItem(unread, localization, stickersById)
-                            ChatMessageItem(read, localization, stickersById)
+                            ChatMessageItem(unread, localization, catalogs)
+                            ChatMessageItem(read, localization, catalogs)
                             for (message in unavailable) {
-                                ChatMessageItem(message, localization, stickersById)
+                                ChatMessageItem(message, localization, catalogs)
                             }
-                            ChatMessageItem(short, localization, stickersById)
-                            ChatMessageItem(long, localization, stickersById)
+                            ChatMessageItem(short, localization, catalogs)
+                            ChatMessageItem(long, localization, catalogs)
                             PixelImage(
                                 path = "${JineAssets.Stickers.PCHAN_DIRECTORY}/${localization.language}/love.png",
                                 modifier = Modifier.size(72.dp),
