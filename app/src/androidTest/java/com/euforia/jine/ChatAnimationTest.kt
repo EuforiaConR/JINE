@@ -42,16 +42,17 @@ import androidx.compose.ui.platform.createLifecycleAwareWindowRecomposer
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.euforia.jine.core.audio.AudioSessionViewModel
 import com.euforia.jine.core.audio.ChatSoundCoordinator
+import com.euforia.jine.core.audio.JineAudioManager
+import com.euforia.jine.core.audio.MusicPlayer
 import com.euforia.jine.core.audio.SoundEffect
 import com.euforia.jine.core.audio.SoundEffectPlayer
 import com.euforia.jine.core.localization.ProvideLocalizedResources
@@ -471,23 +472,49 @@ class ChatAnimationTest {
         assertEquals(listOf(3_200L), originalAudio.receiveTimes)
 
         scenario.recreate()
-        val freshAudio = RecordingSounds(scheduler)
-        val restored = attachSoundChat(scheduler, freshAudio)
+        val restored = attachSoundChat(scheduler, originalAudio)
         assertTrue(chat === restored)
-        assertEquals(1, originalAudio.releases)
+        assertEquals(0, originalAudio.releases)
         advanceChatTime(scheduler, 500)
         assertEquals(listOf(3_200L), originalAudio.receiveTimes)
-        assertTrue(freshAudio.effects.isEmpty())
+        val effectsBeforeSend = originalAudio.effects
         tap(awaitTag("${PICKER_STICKER_TAG_PREFIX}ok"))
         settle()
         at(900)
-        assertEquals(listOf(SoundEffect.CLICK, SoundEffect.SEND_STAMP), freshAudio.effects)
+        assertEquals(effectsBeforeSend + listOf(SoundEffect.CLICK, SoundEffect.SEND_STAMP), originalAudio.effects)
+    }
+
+    @Test
+    fun deniedFocusLeavesChatFunctionalAndNewEffectsCanPlayAfterResume() = withHost {
+        val scheduler = TestCoroutineScheduler()
+        val player = RecordingSounds(scheduler)
+        val focus = TestAudioFocus(granted = false)
+        val chat = attachSoundChat(scheduler, player, focus = focus)
+        tap(awaitTag("${PICKER_STICKER_TAG_PREFIX}ok"))
+        settle()
+        at(200)
+        advanceChatTime(scheduler, 1_600)
+        assertEquals(MessageSender.AME, chat.uiState.value.messages.last().sender)
+        assertTrue(player.effects.isEmpty())
+        assertEquals(1, focus.requests)
+
+        scenario.moveToState(Lifecycle.State.CREATED)
+        onMain { focus.granted = true }
+        scenario.moveToState(Lifecycle.State.RESUMED)
+        at(500)
+        assertTrue(player.effects.isEmpty())
+        tap(awaitTag("${PICKER_STICKER_TAG_PREFIX}ok"))
+        settle()
+        at(700)
+        assertEquals(listOf(SoundEffect.CLICK, SoundEffect.SEND_STAMP), player.effects)
+        assertEquals(2, focus.requests)
     }
 
     private fun attachSoundChat(
         scheduler: TestCoroutineScheduler,
         player: RecordingSounds,
-        language: androidx.compose.runtime.State<String> = mutableStateOf("es")
+        language: androidx.compose.runtime.State<String> = mutableStateOf("es"),
+        focus: TestAudioFocus = TestAudioFocus()
     ): ChatViewModel {
         lateinit var chat: ChatViewModel
         scenario.onActivity { activity ->
@@ -496,13 +523,14 @@ class ChatAnimationTest {
                 initializer { ChatViewModel(now = { scheduler.currentTime }, dispatcher = dispatcher) }
             }
             chat = ViewModelProvider(activity, factory)[ChatViewModel::class.java]
-            val sounds = ChatSoundCoordinator(player)
-            activity.lifecycle.addObserver(object : DefaultLifecycleObserver {
-                override fun onDestroy(owner: LifecycleOwner) { sounds.release() }
-            })
+            val audioFactory = viewModelFactory {
+                initializer { AudioSessionViewModel(JineAudioManager(NoMusic, ChatSoundCoordinator(player), focus)) }
+            }
+            val audio = ViewModelProvider(activity, audioFactory)[AudioSessionViewModel::class.java]
+            val host = audio.bindHost(activity.lifecycle)
             activity.setContent {
                 CompositionLocalProvider(LocalChatAnimationSpec provides spec) {
-                    ChatScreen(chat, language = language.value, sounds = sounds)
+                    ChatScreen(chat, language = language.value, audioHost = host)
                 }
             }
         }
@@ -545,6 +573,14 @@ class ChatAnimationTest {
 
         override fun stopAll() { stops++ }
         override fun release() { releases++ }
+    }
+
+    private object NoMusic : MusicPlayer {
+        override fun prepare() = Unit
+        override fun play() = Unit
+        override fun pause() = Unit
+        override fun setVolume(volume: Float) = Unit
+        override fun release() = Unit
     }
 
     @Composable

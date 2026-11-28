@@ -23,6 +23,10 @@ object JineAssets {
     }
 
     object Audio {
+        object Music {
+            const val MAINLOOP_NORMAL = "audio/music/mainloop_normal.ogg"
+        }
+
         object Sfx {
             private const val DIRECTORY = "audio/sfx"
             const val CLICK = "$DIRECTORY/poko_click.wav"

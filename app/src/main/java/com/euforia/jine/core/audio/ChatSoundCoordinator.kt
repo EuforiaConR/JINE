@@ -33,7 +33,7 @@ internal class ChatSoundCoordinator(
         if (released) return
         val wasAudible = volume > 0f
         volume = volumes.effectiveSfx
-        if (wasAudible && volume == 0f) stopPresentationSounds()
+        if (wasAudible && volume == 0f && resumed) stopPresentationSounds()
         if (!wasAudible && volume > 0f) currentHistory.mapTo(seenIds, Message::id)
     }
 

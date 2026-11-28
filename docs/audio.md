@@ -1,27 +1,33 @@
-# Efectos de sonido de JINE
+# Audio de JINE
 
-La fase 1.5.1 reproduce tres archivos WAV empaquetados en `app/src/main/assets/audio/sfx/`.
+JINE reproduce música de fondo con [AndroidX Media3 ExoPlayer 1.11.1](https://developer.android.com/jetpack/androidx/releases/media3#1.11.1) y efectos con `SoundPool`.
 
-| Archivo | Cuándo suena |
+| Asset | Cuándo suena |
 | --- | --- |
-| `poko_click.wav` | Una vez cuando el chat acepta un sticker o una opción narrativa. |
-| `jine_send_stamp.wav` | Una vez al terminar la aparición de un mensaje nuevo de P-chan. Con escala de animación cero, el final es inmediato. |
-| `jine_recieve.wav` | Una vez al comenzar la aparición de cada mensaje nuevo de Ame. |
+| `audio/music/mainloop_normal.ogg` | Automáticamente al entrar en primer plano con foco. Se repite en bucle y conserva su posición entre pausas. |
+| `audio/sfx/poko_click.wav` | Una vez cuando el chat acepta un sticker o una opción narrativa. |
+| `audio/sfx/jine_send_stamp.wav` | Una vez al terminar la aparición de un mensaje nuevo de P-chan. Con escala de animación cero, el final es inmediato. |
+| `audio/sfx/jine_recieve.wav` | Una vez al comenzar la aparición de cada mensaje nuevo de Ame. |
 
-## Carga, volumen y ciclo de vida
+## Sesión y recursos
 
-- `MainActivity` crea un SoundPool por Activity y lo comparte entre las variantes debug y release. Precarga los tres WAV mediante descriptores de assets. Cada efecto queda disponible cuando Android confirma su decodificación. Los intentos anteriores a esa confirmación se descartan. Los errores se registran con la etiqueta `JineAudio`.
-- `ChatAudioVolumes` recibe valores de master y SFX entre 0 y 1, ambos inicialmente en 1. Su producto es el volumen de cada nueva voz. Llevar el producto a cero detiene las voces y cancela el audio pendiente. Los ajustes son internos y viven en memoria. `setVolumes` recibe el historial actual para usarlo como línea base silenciosa al quitar el mute.
-- El pool permite ocho voces de prioridad uniforme. El registro de streams está acotado y detiene el más antiguo al sustituirlo, para que ninguna voz quede fuera del alcance de la pausa. Los sample IDs se conservan aparte de los stream IDs.
-- El chat permite efectos mientras está adjunto y la Activity está en `RESUMED`. Al pausar o retirar la pantalla, descarta los efectos de envío pendientes y detiene las voces. El pool queda precargado hasta destruir la Activity. Al reanudar, el historial vigente del ViewModel se toma como línea base silenciosa.
-- El coordinador recibe el fin del fade desde el registro de apariciones. El sonido de envío sigue la duración real de la animación, incluida la escala del sistema. Scroll, recibos, idioma y cambios de panel no originan efectos. La disponibilidad del audio es independiente del envío y del ejecutor narrativo.
+- `AudioSessionViewModel` retiene `JineAudioManager`, un ExoPlayer y un SoundPool entre recreaciones de Activity. Usa el contexto de aplicación y libera los recursos cuando se limpia el ViewModel. La posición y los volúmenes viven en memoria. Una sesión nueva comienza en cero y con volúmenes en `1f`.
+- `Media3MusicPlayer` prepara `asset:///audio/music/mainloop_normal.ogg` una vez con `REPEAT_MODE_ONE`. `pause()` conserva la posición y `play()` continúa desde ella. El OGG se lee directamente de los assets. Un error de música se registra con la etiqueta `JineAudio` y deshabilita el reproductor de esa sesión. Los SFX siguen sujetos al foco y a su propia disponibilidad.
+- `SoundPoolEffectPlayer` precarga los tres WAV mediante descriptores. Cada efecto queda disponible tras la confirmación de Android. Los intentos anteriores se descartan. El pool admite ocho voces de prioridad uniforme y mantiene un registro acotado de streams para poder detenerlas.
+- `ChatSoundCoordinator` consume interacciones aceptadas y eventos de aparición de todo el historial. El sonido de envío sigue el fade real. Scroll, recibos, idioma y cambios de panel no generan efectos. En debug y release se usa el mismo propietario de audio.
 
-Esta fase incluye SFX. La música de fondo está reservada para la fase 1.5.2, junto con su volumen y la política compartida de audio focus.
+## Foco y volumen
+
+- `JineAudioManager` solicita un único foco `AUDIOFOCUS_GAIN` en primer plano mediante `AudioManager`. ExoPlayer usa atributos de música de juego con su gestión automática de foco desactivada. Una interacción del chat nunca solicita foco. [Política de audio focus de Android](https://developer.android.com/media/optimize/audio-focus)
+- Al salir de `RESUMED`, el manager pausa la música, detiene las voces SFX, descarta los efectos de envío pendientes y abandona el foco. Una pérdida transitoria, incluida la petición de ducking, pausa ambas salidas y conserva la solicitud para un eventual `GAIN`. Ante denegación o pérdida permanente, se espera al siguiente resume o a un cambio explícito de un canal de silencio a audible. Los callbacks de solicitudes y pantallas obsoletas se ignoran. La sesión funciona en primer plano, sin servicio de reproducción ni persistencia.
+- Los efectos también requieren que el chat esté montado. Al recuperar el permiso para reproducirlos, el manager toma `ChatViewModel.uiState.value.messages` como línea base silenciosa. Así, los mensajes ya publicados y los fades cancelados quedan en silencio. El chat y la narrativa siguen avanzando según su propio estado.
+- `AudioSessionViewModel.setVolumes` recibe `ChatAudioVolumes(master, sfx, bgm)`, con valores entre `0f` y `1f`. El volumen efectivo es `master * sfx` para voces nuevas y `master * bgm` para la música. Silenciar BGM pausa el tema en su posición actual. Silenciar SFX detiene las voces y descarta los efectos pendientes. Con ambos canales silenciados se abandona el foco.
 
 ## Comprobación en el dispositivo
 
-1. Abre debug y espera a que cargue la app. El historial inicial debe quedar en silencio.
-2. Envía OK y LOVE. Comprueba el click de cada envío, el efecto al terminar cada fade y un sonido de recepción por cada mensaje de Ame. El indicador de leído no debe añadir audio.
-3. Abre **Debug · Demo narrativa**. El propio control queda en silencio. Elige una opción y comprueba el click y el sonido al terminar de aparecer el texto de P-chan.
-4. Minimiza durante un fade o mientras suena una recepción. Al regresar, solo los mensajes nuevos deben sonar. Repite con la escala de animación en cero para comprobar que el efecto de envío sigue el final inmediato.
-5. Envía varios stickers seguidos y recorre el historial. Cambia el idioma o recrea la Activity. Comprueba que los mensajes anteriores quedan en silencio.
+1. Abre la variante debug. Debe arrancar el tema normal y el historial inicial debe quedar en silencio. Si no suena, revisa Logcat con la etiqueta `JineAudio`.
+2. Envía OK, LOVE y varios stickers seguidos. Comprueba que la música continúa, que suena el efecto de envío al acabar cada fade y que cada mensaje de Ame suena una sola vez.
+3. Abre **Debug · Demo narrativa**, prueba cada decisión y regresa al selector. El control de demo queda en silencio y la música conserva su posición durante el diálogo.
+4. Pulsa Inicio, bloquea la pantalla o cambia a otra app con audio. Comprueba que JINE se silencia. Al volver, revisa que la música continúe desde donde se pausó y que los mensajes anteriores queden en silencio.
+5. Recrea la Activity con un diálogo activo. Comprueba que la música sigue desde su posición anterior y que se puede continuar la conversación. Escucha la vuelta del final al comienzo para evaluar la continuidad del bucle.
+6. Cierra JINE definitivamente y vuelve a abrirlo. La sesión nueva debe empezar el tema desde el principio.

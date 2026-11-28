@@ -29,14 +29,12 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModelProvider
-import androidx.lifecycle.DefaultLifecycleObserver
-import androidx.lifecycle.LifecycleOwner
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.findViewTreeViewModelStoreOwner
 import com.euforia.jine.R
 import com.euforia.jine.core.assets.JineAssets
-import com.euforia.jine.core.audio.ChatSoundCoordinator
+import com.euforia.jine.core.audio.ChatSoundEvents
+import com.euforia.jine.core.audio.JineAudioManager
 import com.euforia.jine.core.localization.JineLanguageManager
 import com.euforia.jine.core.localization.ProvideLocalizedResources
 import com.euforia.jine.core.localization.rememberLocalization
@@ -77,7 +75,7 @@ fun ChatScreen(
 internal fun ChatScreen(
     viewModel: ChatViewModel,
     language: String = JineLanguageManager.DEFAULT_LANGUAGE,
-    sounds: ChatSoundCoordinator? = null,
+    audioHost: JineAudioManager.Host? = null,
     onStickerSent: (Sticker) -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -85,7 +83,15 @@ internal fun ChatScreen(
     val validStickerIds = remember(stickers) { stickers.orEmpty().map { it.id }.toSet() }
 
     key(viewModel) {
-        if (sounds != null) AttachChatSounds(viewModel, sounds)
+        val sounds = remember(audioHost, viewModel) {
+            audioHost?.createChat { viewModel.uiState.value.messages }
+        }
+        if (sounds != null) {
+            DisposableEffect(sounds) {
+                sounds.attach()
+                onDispose(sounds::detach)
+            }
+        }
         ChatContent(
             uiState,
             language,
@@ -101,27 +107,6 @@ internal fun ChatScreen(
             },
             sounds = sounds
         )
-    }
-}
-
-@Composable
-private fun AttachChatSounds(viewModel: ChatViewModel, sounds: ChatSoundCoordinator) {
-    val lifecycle = LocalLifecycleOwner.current.lifecycle
-    DisposableEffect(lifecycle, viewModel, sounds) {
-        val observer = object : DefaultLifecycleObserver {
-            override fun onResume(owner: LifecycleOwner) {
-                sounds.resume(viewModel.uiState.value.messages)
-            }
-
-            override fun onPause(owner: LifecycleOwner) {
-                sounds.pause()
-            }
-        }
-        lifecycle.addObserver(observer)
-        onDispose {
-            lifecycle.removeObserver(observer)
-            sounds.pause()
-        }
     }
 }
 
@@ -145,7 +130,7 @@ internal fun ChatContent(
     stickers: List<Sticker>?,
     onStickerPressed: (Sticker) -> Unit = {},
     onChoicePressed: (promptId: String, choiceId: String) -> Unit = { _, _ -> },
-    sounds: ChatSoundCoordinator? = null
+    sounds: ChatSoundEvents? = null
 ) {
     val localization = rememberLocalization(language)
     val stickersById = remember(stickers) { stickers.orEmpty().associateBy { it.id } }

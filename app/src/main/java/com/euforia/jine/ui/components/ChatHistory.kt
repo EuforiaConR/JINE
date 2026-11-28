@@ -29,7 +29,7 @@ import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
-import com.euforia.jine.core.audio.ChatSoundCoordinator
+import com.euforia.jine.core.audio.ChatSoundEvents
 import com.euforia.jine.core.localization.LocalizationSnapshot
 import com.euforia.jine.data.model.Message
 import com.euforia.jine.data.model.MessageSender
@@ -47,7 +47,7 @@ internal fun ChatHistory(
     state: LazyListState,
     viewport: IntSize,
     panelHeightPx: Int?,
-    sounds: ChatSoundCoordinator? = null
+    sounds: ChatSoundEvents? = null
 ) {
     val appearances = rememberMessageAppearances(
         messages,
