@@ -132,7 +132,9 @@ class JineAudioManagerTest {
         session.focus.emit(1, AudioFocusChange.LOSS)
         chat.onInteractionAccepted()
         session.focus.emit(1, AudioFocusChange.GAIN)
-        session.manager.setVolumes(ChatAudioVolumes(bgm = 0.5f))
+        val quieterBgm = session.music.volume / 2f
+        session.manager.setVolumes(ChatAudioVolumes(bgm = quieterBgm))
+        assertEquals(quieterBgm, session.music.volume, 0.001f)
         assertEquals(2, session.focus.requests)
         assertEquals(1, session.focus.abandons)
         assertFalse(session.music.playing)
@@ -255,7 +257,7 @@ class JineAudioManagerTest {
         val fresh = Session()
         fresh.manager.attachHost().resume()
         assertEquals(0L, fresh.music.position)
-        assertEquals(1f, fresh.music.volume, 0.001f)
+        assertEquals(ChatAudioVolumes().effectiveBgm, fresh.music.volume, 0.001f)
         assertTrue(fresh.music.playing)
     }
 

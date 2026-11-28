@@ -11,7 +11,7 @@ JINE reproduce música de fondo con [AndroidX Media3 ExoPlayer 1.11.1](https://d
 
 ## Sesión y recursos
 
-- `AudioSessionViewModel` retiene `JineAudioManager`, un ExoPlayer y un SoundPool entre recreaciones de Activity. Usa el contexto de aplicación y libera los recursos cuando se limpia el ViewModel. La posición y los volúmenes viven en memoria. Una sesión nueva comienza en cero y con volúmenes en `1f`.
+- `AudioSessionViewModel` retiene `JineAudioManager`, un ExoPlayer y un SoundPool entre recreaciones de Activity. Usa el contexto de aplicación y libera los recursos cuando se limpia el ViewModel. La posición y los volúmenes viven en memoria. Una sesión nueva comienza desde el inicio de la pista con master y SFX en `1f` y BGM en `0.5f`.
 - `Media3MusicPlayer` prepara `asset:///audio/music/mainloop_normal.ogg` una vez con `REPEAT_MODE_ONE`. `pause()` conserva la posición y `play()` continúa desde ella. El OGG se lee directamente de los assets. Un error de música se registra con la etiqueta `JineAudio` y deshabilita el reproductor de esa sesión. Los SFX siguen sujetos al foco y a su propia disponibilidad.
 - `SoundPoolEffectPlayer` precarga los tres WAV mediante descriptores. Cada efecto queda disponible tras la confirmación de Android. Los intentos anteriores se descartan. El pool admite ocho voces de prioridad uniforme y mantiene un registro acotado de streams para poder detenerlas.
 - `ChatSoundCoordinator` consume interacciones aceptadas y eventos de aparición de todo el historial. El sonido de envío sigue el fade real. Scroll, recibos, idioma y cambios de panel no generan efectos. En debug y release se usa el mismo propietario de audio.
